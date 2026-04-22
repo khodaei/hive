@@ -336,7 +336,12 @@ func resumeSession(s *store.Store, cfg config.Config, card store.Card) (store.Ca
 		if card.ClaudeSessionID != "" {
 			claudeCmd = fmt.Sprintf("%s --resume %s", cfg.ClaudeCmd, card.ClaudeSessionID)
 		}
-		if err := tmux.SendKeys(tmuxName, claudeCmd); err != nil {
+		// Prefix an explicit `cd` so the resume happens in the worktree even
+		// if a login shell's init scripts chdir'd to $HOME (common on macOS
+		// setups). Claude Code scopes transcripts by cwd — `claude --resume
+		// <uuid>` from the wrong dir can't find the session.
+		fullCmd := fmt.Sprintf("cd %q && %s", card.WorktreePath, claudeCmd)
+		if err := tmux.SendKeys(tmuxName, fullCmd); err != nil {
 			return card, fmt.Errorf("launch claude: %w", err)
 		}
 	}
