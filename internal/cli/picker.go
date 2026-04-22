@@ -286,13 +286,15 @@ func pickFzf(cards []store.Card, initialQuery string, withActions bool) (store.C
 	// executable via $HIVE_BIN so this works even when hive isn't on $PATH.
 	previewCmd := `"$HIVE_BIN" card {1} 2>/dev/null || echo "(no details)"`
 
+	// No --height → fzf uses the alt-screen (full-terminal takeover, prior
+	// shell history restored on exit). With --border=rounded that'd look
+	// heavy as a full-screen frame, so we drop the border too — the alt
+	// screen's own clearing is enough separation.
 	args := []string{
 		"--ansi",
 		"--delimiter=\t",
 		"--with-nth=2..",
 		"--layout=reverse",
-		"--height=85%",
-		"--border=rounded",
 		"--header", pickerHeader(withActions),
 		"--preview", previewCmd,
 		"--preview-window", "right:45%:wrap:border-left",
