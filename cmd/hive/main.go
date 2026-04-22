@@ -524,6 +524,7 @@ func runList(args []string) {
 // Bare positional forms (`hive "fix auth"`, `hive .`) dispatch here too.
 func runNew(args []string) {
 	var title, prompt, repoName, branchOverride, worktreeOverride string
+	detach := false
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "-p", "--prompt":
@@ -551,6 +552,8 @@ func runNew(args []string) {
 				title = args[i+1]
 				i++
 			}
+		case "-d", "--bg", "--detach":
+			detach = true
 		case ".":
 			// `hive new .` / `hive .` means "use cwd as worktree".
 			cwd, _ := os.Getwd()
@@ -564,11 +567,16 @@ func runNew(args []string) {
 	if title == "" && worktreeOverride != "" {
 		title = filepath.Base(worktreeOverride)
 	}
-	newCreate(title, prompt, repoName, branchOverride, worktreeOverride)
+	newCreate(title, prompt, repoName, branchOverride, worktreeOverride, detach)
 }
 
-// newCreate is the shared create-and-attach implementation.
-func newCreate(title, prompt, repoName, branchOverride, worktreeOverride string) {
+// newCreate is the shared create-and-attach implementation. When detach is
+// true we skip the final tmux attach and the in-process prompt-send
+// goroutine; the card is inserted with PendingPrompt set and the poller
+// delivers the prompt once Claude reaches idle. Detach mode relies on
+// 'hive daemon' (or another long-running poller) to ship the prompt —
+// otherwise it stays pending until the next TUI / serve run.
+func newCreate(title, prompt, repoName, branchOverride, worktreeOverride string, detach bool) {
 	cfg, s := mustLoadConfigAndStore()
 	defer s.Close()
 
@@ -707,6 +715,21 @@ func newCreate(title, prompt, repoName, branchOverride, worktreeOverride string)
 			log.Fatalf("insert card: %v", err)
 		}
 		fmt.Printf("Created card: %s (tmux: %s)\n", card.ID, sessionName)
+	}
+
+	// Detach mode short-circuits: we leave PendingPrompt on the card and
+	// let the poller deliver it when Claude reaches idle. Skips both the
+	// in-process prompt goroutine and the attach / switch-client call.
+	if detach {
+		if prompt != "" {
+			fmt.Println("Prompt will be sent once Claude is idle (poller / daemon delivers it).")
+		}
+		if card != nil {
+			fmt.Printf("Started in background. Attach with: hive a %s\n", shortIDFmt(card.ID))
+		} else {
+			fmt.Printf("Started tmux session %s in background — attach with: tmux attach -t %s\n", sessionName, sessionName)
+		}
+		return
 	}
 
 	promptDone := make(chan struct{})

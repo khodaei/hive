@@ -50,7 +50,8 @@ _hive() {
             '(-t --title)'{-t,--title}'[Title]:title' \
             '(-p --prompt)'{-p,--prompt}'[Initial prompt]:prompt' \
             '(-b --branch)'{-b,--branch}'[Branch name]:branch' \
-            '(-w --worktree)'{-w,--worktree}'[Existing worktree path]:worktree:_files -/'
+            '(-w --worktree)'{-w,--worktree}'[Existing worktree path]:worktree:_files -/' \
+            '(-d --bg --detach)'{-d,--bg,--detach}'[Run in background, stay in shell]'
           if [[ $state == repos ]]; then
             _hive_repos
           fi

@@ -60,6 +60,7 @@ complete -c hive -n "__fish_seen_subcommand_from new" -l title -s t -d "Title"
 complete -c hive -n "__fish_seen_subcommand_from new" -l prompt -s p -d "Initial prompt"
 complete -c hive -n "__fish_seen_subcommand_from new" -l branch -s b -d "Branch"
 complete -c hive -n "__fish_seen_subcommand_from new" -l worktree -s w -d "Worktree"
+complete -c hive -n "__fish_seen_subcommand_from new" -l bg -s d -d "Background — skip attach"
 
 complete -c hive -n "__fish_seen_subcommand_from ls list" -l repo -s r -d "Filter by repo"
 complete -c hive -n "__fish_seen_subcommand_from ls list" -l status -s s -d "Filter by status"

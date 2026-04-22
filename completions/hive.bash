@@ -86,7 +86,7 @@ _hive() {
       COMPREPLY=($(compgen -W "--short --json -s" -- "$cur"))
       ;;
     new)
-      COMPREPLY=($(compgen -W "--repo --title --prompt --branch --worktree -r -t -p -b -w" -- "$cur"))
+      COMPREPLY=($(compgen -W "--repo --title --prompt --branch --worktree --bg --detach -r -t -p -b -w -d" -- "$cur"))
       ;;
     template)
       COMPREPLY=($(compgen -W "list show create" -- "$cur"))
