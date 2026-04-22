@@ -210,8 +210,18 @@ func runPickerOrHelp() {
 			}
 			continue
 		default:
+			// Outside tmux, attachToCard blocks on `tmux attach-session`
+			// and returns when the user detaches (Ctrl-b d). We loop so
+			// the picker reopens — one of the nicer no-arg-hive UX wins.
+			// Inside tmux, attachToCard used switch-client (non-blocking);
+			// looping there would spam the picker behind the switched-to
+			// session, so we exit instead.
+			insideTmux := os.Getenv("TMUX") != ""
 			attachToCard(s, cfg, card)
-			return
+			if insideTmux {
+				return
+			}
+			continue
 		}
 	}
 }
