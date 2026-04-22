@@ -1551,20 +1551,30 @@ func runResume(args []string) {
 	if err != nil {
 		log.Fatalf("list cards: %v", err)
 	}
+	// Resumable = anything without a live tmux session. That includes:
+	//   - Done / Archived cards (archived via `hive done`).
+	//   - Active + Paused cards (imported via `hive import --session-id`,
+	//     or cards whose tmux died but whose status the poller correctly
+	//     flipped to Paused).
 	candidates := make([]store.Card, 0, len(all))
-	activeCount := 0
+	liveActiveCount := 0
 	for _, c := range all {
-		if c.ColumnID == store.ColumnDone || c.ColumnID == store.ColumnArchived {
+		resumable := c.ColumnID == store.ColumnDone ||
+			c.ColumnID == store.ColumnArchived ||
+			c.Status == store.StatusPaused
+		if resumable {
 			candidates = append(candidates, c)
-		} else if c.ColumnID == store.ColumnActive {
-			activeCount++
+			continue
+		}
+		if c.ColumnID == store.ColumnActive {
+			liveActiveCount++
 		}
 	}
 	if len(candidates) == 0 {
-		if activeCount > 0 {
-			log.Fatalf("no archived cards to resume. (You have %d active — use `hive attach` or `hive` to pick one.)", activeCount)
+		if liveActiveCount > 0 {
+			log.Fatalf("nothing to resume. (You have %d live active cards — use `hive attach` or `hive` to pick one.)", liveActiveCount)
 		}
-		log.Fatalf("no archived cards to resume.")
+		log.Fatalf("nothing to resume.")
 	}
 
 	card, ok := resolveCardOrExit(candidates, query, "resume")
