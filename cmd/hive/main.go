@@ -567,6 +567,13 @@ func runNew(args []string) {
 	if title == "" && worktreeOverride != "" {
 		title = filepath.Base(worktreeOverride)
 	}
+	// Expand @file.md to its contents so users can keep long prompts in a
+	// markdown file and just reference the path.
+	if expanded, err := cli.ResolvePromptArg(prompt); err != nil {
+		log.Fatalf("%v", err)
+	} else {
+		prompt = expanded
+	}
 	newCreate(title, prompt, repoName, branchOverride, worktreeOverride, detach)
 }
 
@@ -2732,6 +2739,7 @@ var verbHelp = map[string]string{
   -r, --repo <name>     Repo name (from config). Auto-detected by default.
   -t, --title <name>    Card title (alternative to the positional arg).
   -p, --prompt <text>   Initial prompt; sent after Claude boots.
+                        Accepts "@file.md" to load the prompt from a file.
   -b, --branch <name>   Branch name (default: derived from the title).
   -w, --worktree <path> Use an existing worktree path instead of creating one.
   .                     Shorthand for '-w $PWD'.
@@ -2804,6 +2812,7 @@ var verbHelp = map[string]string{
 
   <msg> can be:
     literal text    e.g. hive send fix-au "keep going"
+    @file.md        load message from a file: hive send fix-au @context.md
     -               read stdin:     echo hi | hive send fix-au -
     (omit) or -e    open $EDITOR:   hive send fix-au
                                     hive send fix-au --edit
