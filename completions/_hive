@@ -3,7 +3,7 @@
 _hive() {
   local -a commands
   commands=(
-    'new:Create a session and attach'
+    'new:Create a session and attach (or: new pr-review <url>)'
     'attach:Attach to a session'
     'a:Attach to a session (alias)'
     'last:Attach the most-recently-attached session'

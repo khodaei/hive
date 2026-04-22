@@ -523,6 +523,12 @@ func runList(args []string) {
 //
 // Bare positional forms (`hive "fix auth"`, `hive .`) dispatch here too.
 func runNew(args []string) {
+	// Nested subverb: `hive new pr-review <url>`.
+	if len(args) > 0 && args[0] == "pr-review" {
+		runNewPRReview(args[1:])
+		return
+	}
+
 	var title, prompt, repoName, branchOverride, worktreeOverride string
 	detach := false
 	for i := 0; i < len(args); i++ {
@@ -575,6 +581,186 @@ func runNew(args []string) {
 		prompt = expanded
 	}
 	newCreate(title, prompt, repoName, branchOverride, worktreeOverride, detach)
+}
+
+// runNewPRReview backs `hive new pr-review <pr-url> [flags]`. Fetches the PR's
+// head into a local ref, creates a worktree at <repo>/pr-<num>, and launches
+// Claude with a review prompt. Works for same-origin and fork PRs on GitHub
+// and GHE (both expose refs/pull/<num>/head server-side).
+func runNewPRReview(args []string) {
+	if len(args) == 0 {
+		exitWith(exitGeneral, "Usage: hive new pr-review <pr-url> [-d] [-p prompt] [-r repo]")
+	}
+	prURL := args[0]
+
+	var promptOverride, repoOverride string
+	detach := false
+	for i := 1; i < len(args); i++ {
+		switch args[i] {
+		case "-d", "--bg", "--detach":
+			detach = true
+		case "-p", "--prompt":
+			if i+1 < len(args) {
+				promptOverride = args[i+1]
+				i++
+			}
+		case "-r", "--repo":
+			if i+1 < len(args) {
+				repoOverride = args[i+1]
+				i++
+			}
+		default:
+			exitWith(exitGeneral, "pr-review: unknown flag %q", args[i])
+		}
+	}
+
+	host, owner, repoName, num, err := parsePRURL(prURL)
+	if err != nil {
+		exitWith(exitGeneral, "pr-review: %v", err)
+	}
+
+	cfg, s := mustLoadConfigAndStore()
+	defer s.Close()
+	syncRepos(cfg, s)
+
+	var repoCfg *config.Repo
+	if repoOverride != "" {
+		for _, r := range cfg.Repos {
+			r := r
+			if r.Name == repoOverride {
+				repoCfg = &r
+				break
+			}
+		}
+		if repoCfg == nil {
+			exitWith(exitGeneral, "pr-review: --repo %q not in config", repoOverride)
+		}
+	} else {
+		repoCfg = matchRepoByPRURL(cfg.Repos, host, owner, repoName)
+	}
+	if repoCfg == nil {
+		fmt.Fprintf(os.Stderr, "pr-review: no configured repo matches %s/%s/%s\n\nConfigured repos:\n", host, owner, repoName)
+		for _, r := range cfg.Repos {
+			fmt.Fprintf(os.Stderr, "  %s (%s)\n", r.Name, r.Path)
+		}
+		fmt.Fprintln(os.Stderr, "\nHint: pass -r <name> to force a specific one.")
+		os.Exit(exitGeneral)
+	}
+
+	branch := fmt.Sprintf("pr-%d", num)
+	worktreePath := filepath.Join(repoCfg.Path, branch)
+	fetchCmd := exec.Command("git", "-C", repoCfg.Path, "fetch", "--force", "origin",
+		fmt.Sprintf("refs/pull/%d/head:%s", num, branch))
+	if out, err := fetchCmd.CombinedOutput(); err != nil {
+		exitWith(exitGeneral, "pr-review: git fetch: %s: %v", strings.TrimSpace(string(out)), err)
+	}
+	if _, err := os.Stat(worktreePath); err == nil {
+		fmt.Printf("Worktree %s already exists — reusing.\n", worktreePath)
+	} else {
+		wtCmd := exec.Command("git", "-C", repoCfg.Path, "worktree", "add", worktreePath, branch)
+		if out, err := wtCmd.CombinedOutput(); err != nil {
+			exitWith(exitGeneral, "pr-review: git worktree add: %s: %v", strings.TrimSpace(string(out)), err)
+		}
+	}
+
+	prompt := promptOverride
+	if expanded, err := cli.ResolvePromptArg(prompt); err != nil {
+		log.Fatalf("%v", err)
+	} else {
+		prompt = expanded
+	}
+	if prompt == "" {
+		prompt = defaultPRReviewPrompt(prURL, repoCfg.DefaultBranch)
+	}
+
+	title := fmt.Sprintf("Review PR #%d: %s", num, repoName)
+	newCreate(title, prompt, repoCfg.Name, branch, worktreePath, detach)
+}
+
+func parsePRURL(raw string) (host, owner, repo string, number int, err error) {
+	s := raw
+	if !strings.HasPrefix(s, "http://") && !strings.HasPrefix(s, "https://") {
+		s = "https://" + s
+	}
+	u, perr := url.Parse(s)
+	if perr != nil {
+		return "", "", "", 0, fmt.Errorf("parse url: %w", perr)
+	}
+	host = u.Host
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) < 4 || parts[2] != "pull" {
+		return "", "", "", 0, fmt.Errorf("not a PR URL: %q", raw)
+	}
+	owner = parts[0]
+	repo = parts[1]
+	n, perr := strconv.Atoi(parts[3])
+	if perr != nil || n <= 0 {
+		return "", "", "", 0, fmt.Errorf("invalid PR number in %q", raw)
+	}
+	return host, owner, repo, n, nil
+}
+
+func matchRepoByPRURL(repos []config.Repo, host, owner, repoName string) *config.Repo {
+	want := host + "/" + owner + "/" + repoName
+	for _, r := range repos {
+		r := r
+		remote, err := gitOriginURL(r.Path)
+		if err != nil {
+			continue
+		}
+		if normalizeRemoteURL(remote) == want {
+			return &r
+		}
+	}
+	for _, r := range repos {
+		r := r
+		if r.Name == repoName {
+			return &r
+		}
+	}
+	return nil
+}
+
+func gitOriginURL(repoPath string) (string, error) {
+	out, err := exec.Command("git", "-C", repoPath, "remote", "get-url", "origin").Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func normalizeRemoteURL(remote string) string {
+	if strings.HasPrefix(remote, "git@") {
+		rest := strings.TrimPrefix(remote, "git@")
+		if i := strings.Index(rest, ":"); i > 0 {
+			host := rest[:i]
+			path := strings.TrimSuffix(rest[i+1:], ".git")
+			return host + "/" + path
+		}
+	}
+	for _, p := range []string{"https://", "http://", "ssh://git@"} {
+		if strings.HasPrefix(remote, p) {
+			rest := strings.TrimPrefix(remote, p)
+			return strings.TrimSuffix(rest, ".git")
+		}
+	}
+	return ""
+}
+
+func defaultPRReviewPrompt(prURL, defaultBranch string) string {
+	base := defaultBranch
+	if base == "" {
+		base = "main"
+	}
+	return "Please review this pull request: " + prURL + "\n\n" +
+		"The current worktree is checked out to the PR's head branch. To see the changes, run:\n" +
+		"  git diff origin/" + base + "..HEAD\n\n" +
+		"Review for:\n" +
+		"- Correctness bugs and missed edge cases.\n" +
+		"- Risky patterns (SQL safety, auth, race conditions, destructive ops).\n" +
+		"- Test coverage gaps.\n" +
+		"- Unnecessary complexity or layers that don't earn their keep.\n\n" +
+		"Produce a short, high-signal review. Use file:line references. Skip minor style nits. If the PR is fine, say so clearly."
 }
 
 // newCreate is the shared create-and-attach implementation. When detach is
@@ -2730,6 +2916,24 @@ Shell completions:
 // verbHelp holds the long-form help text for each verb. Keep entries short
 // (6–14 lines) and include a usage line + flag reference + an example.
 var verbHelp = map[string]string{
+	"pr-review": `hive new pr-review <pr-url> [flags]
+
+  Spin up a new Claude session dedicated to reviewing a pull request.
+  Fetches refs/pull/<num>/head into a local branch 'pr-<num>', creates a
+  worktree at <repo-root>/pr-<num>, and launches Claude with a review
+  prompt that points it at the diff.
+
+  Works for same-origin and fork PRs on GitHub and GHE.
+
+  Flags:
+    -d, --bg, --detach   Don't attach — stay in the shell.
+    -p, --prompt <text>  Override the default review prompt (or @file.md).
+    -r, --repo <name>    Skip auto-detection; use this configured repo.
+
+  Example:
+    hive new pr-review https://github.com/acme/api/pull/317
+    hive new pr-review https://github.com/acme/api/pull/317 -d
+`,
 	"new": `hive new [title] [flags]
 
   Create a session and attach. With a title, creates a card (auto-detects repo
