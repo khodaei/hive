@@ -2,7 +2,7 @@
 # Install: source this file from your .bashrc, or symlink into /etc/bash_completion.d/
 
 _hive_commands() {
-  echo "new attach a last peek card summarize tail send done resume rm kill list ls archived watch status search cd open doctor tui daemon scan import create config template version help"
+  echo "new attach a last peek card summarize tail send done resume rm kill list ls archived watch status search cd open doctor tui daemon import config template version help"
 }
 
 _hive_card_ids() {
@@ -85,7 +85,7 @@ _hive() {
     status)
       COMPREPLY=($(compgen -W "--short --json -s" -- "$cur"))
       ;;
-    new|create)
+    new)
       COMPREPLY=($(compgen -W "--repo --title --prompt --branch --worktree -r -t -p -b -w" -- "$cur"))
       ;;
     template)

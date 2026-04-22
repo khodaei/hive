@@ -99,12 +99,6 @@ func main() {
 	switch os.Args[1] {
 	case "new":
 		runNew(os.Args[2:])
-	case "claude":
-		// `hive claude` was renamed to `hive new` in the CLI-first refactor.
-		// Forward transparently so muscle memory still works, but leave a
-		// one-line hint so users update their habits.
-		fmt.Fprintln(os.Stderr, "hive: `hive claude` is now `hive new` — forwarding.")
-		runNew(os.Args[2:])
 	case "tui":
 		runTUI()
 	case "daemon":
@@ -118,11 +112,6 @@ func main() {
 		runList(append([]string{"-s", "archived"}, os.Args[2:]...))
 	case "watch":
 		runWatch(os.Args[2:])
-	case "create":
-		// Superseded by `hive new`. Forward with a hint; runCreate is kept
-		// behind the subcommand for one release so muscle memory still works.
-		fmt.Fprintln(os.Stderr, "hive: `hive create` is deprecated — use `hive new`.")
-		runCreate()
 	case "attach", "a":
 		runAttach(os.Args[2:])
 	case "last", "-":
@@ -143,8 +132,6 @@ func main() {
 		runDelete(os.Args[2:], "kill")
 	case "import":
 		runImport()
-	case "scan":
-		runScan()
 	case "open":
 		runOpen(os.Args[2:])
 	case "cd":
@@ -740,117 +727,6 @@ func detectCurrentWorktree(cwd string, repoConfig *config.Repo) (string, string)
 	return topLevel, branch
 }
 
-func runCreate() {
-	if len(os.Args) < 4 {
-		fmt.Fprintf(os.Stderr, "Usage: hive create --repo <name> --title <title> [--prompt <p>]\n")
-		os.Exit(1)
-	}
-
-	var repoName, title, prompt, branch string
-	args := os.Args[2:]
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--repo", "-r":
-			if i+1 < len(args) {
-				repoName = args[i+1]
-				i++
-			}
-		case "--title", "-t":
-			if i+1 < len(args) {
-				title = args[i+1]
-				i++
-			}
-		case "--prompt", "-p":
-			if i+1 < len(args) {
-				prompt = args[i+1]
-				i++
-			}
-		case "--branch", "-b":
-			if i+1 < len(args) {
-				branch = args[i+1]
-				i++
-			}
-		}
-	}
-
-	if repoName == "" || title == "" {
-		fmt.Fprintf(os.Stderr, "Error: --repo and --title are required\n")
-		os.Exit(1)
-	}
-
-	cfg, s := mustLoadConfigAndStore()
-	defer s.Close()
-
-	// Find repo in config
-	var repo *config.Repo
-	for _, r := range cfg.Repos {
-		if r.Name == repoName {
-			repo = &r
-			break
-		}
-	}
-	if repo == nil {
-		log.Fatalf("repo %q not found in config", repoName)
-	}
-
-	if branch == "" {
-		branch = title
-		// Sanitize title to branch name
-		branch = strings.ReplaceAll(branch, " ", "-")
-		branch = strings.ToLower(branch)
-	}
-
-	fmt.Printf("Creating session %q in repo %q (branch: %s)...\n", title, repoName, branch)
-
-	cardID := tui.GenerateID()
-	tmuxName := cfg.TmuxPrefix + cardID
-
-	// Fetch and create worktree
-	gitpkg.Fetch(repo.Path)
-	wtPath, err := gitpkg.CreateWorktree(repo.Path, branch, repo.DefaultBranch)
-	if err != nil {
-		log.Fatalf("create worktree: %v", err)
-	}
-
-	// Create tmux session in the worktree
-	if err := tmux.NewSession(tmuxName, wtPath); err != nil {
-		log.Fatalf("create tmux session: %v", err)
-	}
-
-	tmux.SendKeys(tmuxName, cfg.ClaudeCmd)
-
-	if prompt != "" {
-		time.Sleep(2 * time.Second)
-		tmux.SendKeys(tmuxName, prompt)
-	}
-
-	s.UpsertRepo(store.Repo{
-		Name:          repo.Name,
-		Path:          repo.Path,
-		DefaultBranch: repo.DefaultBranch,
-		SetupScript:   repo.SetupScript,
-	})
-
-	now := time.Now().Unix()
-	card := store.Card{
-		ID:           cardID,
-		Title:        title,
-		Prompt:       prompt,
-		RepoName:     repo.Name,
-		Branch:       branch,
-		WorktreePath: wtPath,
-		ColumnID:     store.ColumnActive,
-		Status:       store.StatusWorking,
-		TmuxSession:  tmuxName,
-		CreatedAt:    now,
-		UpdatedAt:    now,
-	}
-	if err := s.InsertCard(card); err != nil {
-		log.Fatalf("insert card: %v", err)
-	}
-
-	fmt.Printf("Created card %s (tmux: %s, worktree: %s)\n", cardID, tmuxName, wtPath)
-}
 
 // --- Attach ---
 
@@ -2232,7 +2108,7 @@ func runDoctor() {
 				}
 			}
 			if orphans > 0 {
-				record("orphans", false, fmt.Sprintf("%d tmux session(s) with prefix %q not in DB (use `hive scan`/`hive import`)", orphans, prefix))
+				record("orphans", false, fmt.Sprintf("%d tmux session(s) with prefix %q not in DB (use `hive import --tmux <name>`)", orphans, prefix))
 			} else {
 				record("orphans", true, "none")
 			}
@@ -2486,48 +2362,6 @@ func runSend(args []string) {
 	fmt.Printf("Sent to %s (%s)\n", card.Title, card.TmuxSession)
 }
 
-// --- Scan ---
-
-func runScan() {
-	cfg, s := mustLoadConfigAndStore()
-	defer s.Close()
-	syncRepos(cfg, s)
-
-	sessions, err := tmux.ListSessions()
-	if err != nil || len(sessions) == 0 {
-		fmt.Println("No tmux sessions found.")
-		return
-	}
-
-	// Get existing card tmux sessions
-	cards, _ := s.ListCards()
-	known := make(map[string]bool)
-	for _, c := range cards {
-		if c.TmuxSession != "" {
-			known[c.TmuxSession] = true
-		}
-	}
-
-	fmt.Println("Tmux sessions found:")
-	importable := 0
-	for _, sess := range sessions {
-		status := "  "
-		if known[sess] {
-			status = "✓ "
-		} else {
-			status = "? "
-			importable++
-		}
-		cwd, _ := tmux.SessionCWD(sess)
-		fmt.Printf("  %s%-20s  %s\n", status, sess, cwd)
-	}
-
-	fmt.Printf("\n✓ = already in hive, ? = can be imported (%d importable)\n", importable)
-	if importable > 0 {
-		fmt.Println("Import with: hive import --tmux <session-name> --repo <repo> --title <title>")
-	}
-}
-
 // --- Import ---
 
 func runImport() {
@@ -2776,7 +2610,6 @@ Admin:
   repo (see config)     Managed via ~/.hive/config.yaml.
   template list|show|create
                         Manage session templates.
-  scan                  List tmux sessions available for import.
   import                Import existing session (--tmux / --session-id).
 
 Long-running processes (required for background status polling + summaries):
@@ -2784,7 +2617,6 @@ Long-running processes (required for background status polling + summaries):
   daemon                Headless poller + notifications.
 
 Other:
-  create                Deprecated — use 'new'.
   version               Print version.
 
 Exit codes:
@@ -2968,7 +2800,6 @@ var verbHelp = map[string]string{
   -t, --title <name>    Card title (required).
   --cwd <path>          Worktree path (defaults: the tmux session's cwd).
 `,
-	"scan":   "hive scan\n\n  List tmux sessions on the system and mark which are already tracked by\n  hive. Unmarked ones can be imported with 'hive import --tmux <name>'.\n",
 	"config": "hive config check\n\n  Load ~/.hive/config.yaml, print a summary, and validate every repo path.\n  Exits 4 on config problems.\n",
 	"template": `hive template list | show <name> | create <name> [flags]
 
@@ -2979,7 +2810,6 @@ var verbHelp = map[string]string{
     --prompt <text>    Initial prompt.
     --branch <name>    Base branch.
 `,
-	"create":  "hive create [flags]  (deprecated — prefer 'hive new')\n\n  Explicit create. Same flags as 'hive new' but never auto-detects repo from\n  cwd. Kept for script compatibility.\n",
 	"daemon":  "hive daemon\n\n  Run the poller in the foreground, no TUI. Logs to ~/.hive/daemon.log.\n",
 	"version": "hive version\n\n  Print the build version.\n",
 }

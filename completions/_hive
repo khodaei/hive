@@ -27,9 +27,7 @@ _hive() {
     'doctor:Environment sanity checks'
     'tui:Launch the TUI kanban board'
     'daemon:Run background poller (headless)'
-    'scan:List tmux sessions available for import'
     'import:Import an existing tmux or Claude session'
-    'create:Deprecated — use new'
     'config:Validate config and repo paths'
     'template:Manage session templates (list|show|create)'
     'version:Print version'
@@ -46,7 +44,7 @@ _hive() {
       ;;
     args)
       case $words[1] in
-        new|create)
+        new)
           _arguments \
             '(-r --repo)'{-r,--repo}'[Repo name]:repo:->repos' \
             '(-t --title)'{-t,--title}'[Title]:title' \

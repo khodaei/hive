@@ -26,7 +26,6 @@ function __hive_commands
     echo -e "doctor\tEnvironment sanity checks"
     echo -e "tui\tLaunch the TUI"
     echo -e "daemon\tBackground poller"
-    echo -e "scan\tList importable tmux sessions"
     echo -e "import\tImport existing session"
     echo -e "config\tConfig check"
     echo -e "template\tManage templates"
@@ -42,7 +41,7 @@ for c in json.load(sys.stdin):
 ' 2>/dev/null
 end
 
-set -l __hive_subs new attach a last peek card summarize tail send done resume rm kill list ls archived watch status search cd open doctor tui daemon scan import create config template version help
+set -l __hive_subs new attach a last peek card summarize tail send done resume rm kill list ls archived watch status search cd open doctor tui daemon import config template version help
 complete -c hive -n "not __fish_seen_subcommand_from $__hive_subs" -f -a "(__hive_commands)"
 
 # Subcommand: attach-style cards
@@ -56,11 +55,11 @@ complete -c hive -n "__fish_seen_subcommand_from summarize" -l force -s f -d "Re
 complete -c hive -n "__fish_seen_subcommand_from card" -l json -d "JSON output"
 
 # Shared flags
-complete -c hive -n "__fish_seen_subcommand_from new create" -l repo -s r -d "Repo name"
-complete -c hive -n "__fish_seen_subcommand_from new create" -l title -s t -d "Title"
-complete -c hive -n "__fish_seen_subcommand_from new create" -l prompt -s p -d "Initial prompt"
-complete -c hive -n "__fish_seen_subcommand_from new create" -l branch -s b -d "Branch"
-complete -c hive -n "__fish_seen_subcommand_from new create" -l worktree -s w -d "Worktree"
+complete -c hive -n "__fish_seen_subcommand_from new" -l repo -s r -d "Repo name"
+complete -c hive -n "__fish_seen_subcommand_from new" -l title -s t -d "Title"
+complete -c hive -n "__fish_seen_subcommand_from new" -l prompt -s p -d "Initial prompt"
+complete -c hive -n "__fish_seen_subcommand_from new" -l branch -s b -d "Branch"
+complete -c hive -n "__fish_seen_subcommand_from new" -l worktree -s w -d "Worktree"
 
 complete -c hive -n "__fish_seen_subcommand_from ls list" -l repo -s r -d "Filter by repo"
 complete -c hive -n "__fish_seen_subcommand_from ls list" -l status -s s -d "Filter by status"
