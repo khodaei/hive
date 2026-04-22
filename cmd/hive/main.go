@@ -36,6 +36,12 @@ import (
 
 const version = "0.1.0"
 
+// sentinelRepoNone is the repo name attached to ad-hoc sessions — those
+// started by `hive new` in a directory that doesn't match any configured
+// repo. Ensures cards always have a valid repos.name FK target and gives
+// the user something to filter on (`hive ls -r '(none)'`).
+const sentinelRepoNone = "(none)"
+
 // Exit codes (documented contract):
 //
 //	0 success
@@ -601,70 +607,81 @@ func newCreate(title, prompt, repoName, branchOverride, worktreeOverride string)
 				}
 			}
 		}
-		if repoConfig == nil {
-			// No repo detected — fall back to a cardless Claude session in cwd.
-			fmt.Fprintf(os.Stderr, "No configured repo found for %s — starting Claude without a card.\n", cwd)
-			title = ""
-			sessionName = fmt.Sprintf("claude_%d", time.Now().Unix())
+		// No configured repo matched cwd and none was given via -r. Track it
+		// anyway as an "(none)" sentinel-repo card anchored at cwd so the
+		// rest of hive (ls/attach/card/done/resume/summary) all work.
+		adhoc := repoConfig == nil
+		if adhoc {
+			repoConfig = &config.Repo{Name: sentinelRepoNone, Path: "", DefaultBranch: ""}
+		}
+
+		if title == "" {
+			// Derive a sensible default title if the caller only gave us `.`
+			// or a worktree without a title.
+			if worktreeOverride != "" {
+				title = filepath.Base(worktreeOverride)
+			} else {
+				title = filepath.Base(cwd)
+			}
+		}
+		branch := branchOverride
+		switch {
+		case adhoc:
+			// Ad-hoc: the "worktree" is just cwd. Skip git worktree creation.
 			wtPath = cwd
-		} else {
-			if title == "" {
-				// Derive a sensible default title if the caller only gave us `.`
-				// or a worktree without a title.
-				if worktreeOverride != "" {
-					title = filepath.Base(worktreeOverride)
-				} else {
-					title = filepath.Base(cwd)
+			if branch == "" {
+				branch = currentBranchAt(wtPath) // empty for non-git dirs
+			}
+			fmt.Printf("Ad-hoc session in %s", wtPath)
+			if branch != "" {
+				fmt.Printf(" (branch: %s)", branch)
+			}
+			fmt.Println()
+		case worktreeOverride != "":
+			wtPath = worktreeOverride
+			if branch == "" {
+				branch = currentBranchAt(wtPath)
+				if branch == "" {
+					branch = repoConfig.DefaultBranch
 				}
 			}
-			branch := branchOverride
-			switch {
-			case worktreeOverride != "":
-				wtPath = worktreeOverride
+			fmt.Printf("Using worktree: %s (branch: %s)\n", wtPath, branch)
+		default:
+			detectedWT, detectedBranch := detectCurrentWorktree(cwd, repoConfig)
+			if detectedWT != "" {
+				wtPath = detectedWT
 				if branch == "" {
-					branch = currentBranchAt(wtPath)
+					branch = detectedBranch
 					if branch == "" {
 						branch = repoConfig.DefaultBranch
 					}
 				}
-				fmt.Printf("Using worktree: %s (branch: %s)\n", wtPath, branch)
-			default:
-				detectedWT, detectedBranch := detectCurrentWorktree(cwd, repoConfig)
-				if detectedWT != "" {
-					wtPath = detectedWT
-					if branch == "" {
-						branch = detectedBranch
-						if branch == "" {
-							branch = repoConfig.DefaultBranch
-						}
-					}
-					fmt.Printf("Using existing worktree: %s (branch: %s)\n", wtPath, branch)
-				} else {
-					if branch == "" {
-						branch = strings.ReplaceAll(strings.ToLower(title), " ", "-")
-					}
-					fmt.Printf("Creating new worktree in %s (branch: %s)...\n", repoConfig.Name, branch)
-					gitpkg.Fetch(repoConfig.Path)
-					var err error
-					wtPath, err = gitpkg.CreateWorktree(repoConfig.Path, branch, repoConfig.DefaultBranch)
-					if err != nil {
-						log.Fatalf("create worktree: %v", err)
-					}
+				fmt.Printf("Using existing worktree: %s (branch: %s)\n", wtPath, branch)
+			} else {
+				if branch == "" {
+					branch = strings.ReplaceAll(strings.ToLower(title), " ", "-")
+				}
+				fmt.Printf("Creating new worktree in %s (branch: %s)...\n", repoConfig.Name, branch)
+				gitpkg.Fetch(repoConfig.Path)
+				var err error
+				wtPath, err = gitpkg.CreateWorktree(repoConfig.Path, branch, repoConfig.DefaultBranch)
+				if err != nil {
+					log.Fatalf("create worktree: %v", err)
 				}
 			}
+		}
 
-			cardID := tui.GenerateID()
-			sessionName = cfg.TmuxPrefix + cardID
-			now := time.Now().Unix()
-			card = &store.Card{
-				ID: cardID, Title: title, Prompt: prompt,
-				RepoName: repoConfig.Name, Branch: branch, WorktreePath: wtPath,
-				ColumnID: store.ColumnActive, Status: store.StatusWorking,
-				TmuxSession: sessionName, CreatedAt: now, UpdatedAt: now,
-			}
-			if prompt != "" {
-				card.PendingPrompt = prompt
-			}
+		cardID := tui.GenerateID()
+		sessionName = cfg.TmuxPrefix + cardID
+		now := time.Now().Unix()
+		card = &store.Card{
+			ID: cardID, Title: title, Prompt: prompt,
+			RepoName: repoConfig.Name, Branch: branch, WorktreePath: wtPath,
+			ColumnID: store.ColumnActive, Status: store.StatusWorking,
+			TmuxSession: sessionName, CreatedAt: now, UpdatedAt: now,
+		}
+		if prompt != "" {
+			card.PendingPrompt = prompt
 		}
 	}
 
@@ -2584,6 +2601,9 @@ func syncRepos(cfg config.Config, s *store.Store) {
 			SetupScript:   r.SetupScript,
 		})
 	}
+	// Sentinel repo used by ad-hoc (non-configured-repo) sessions so the
+	// repos.name FK always has a valid target. Idempotent via UpsertRepo.
+	s.UpsertRepo(store.Repo{Name: sentinelRepoNone})
 }
 
 func printUsage() {
