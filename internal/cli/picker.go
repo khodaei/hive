@@ -116,9 +116,9 @@ func colorize(s, color string) string {
 // room for "needs_input" in the STATUS column. Fields are padded *before*
 // ANSI color codes are applied so escape sequences don't throw off the count.
 const (
-	colTitle  = 22
+	colTitle  = 25
 	colRepo   = 14
-	colStatus = 13 // enough for "❓ needs_input" (1 icon + space + 11)
+	colStatus = 10 // "❓ needs_input" truncates to "❓ needs_i…" — still readable
 	colAge    = 4
 )
 
