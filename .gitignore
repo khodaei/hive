@@ -1,0 +1,11 @@
+# Build output
+/hive
+
+# macOS
+.DS_Store
+
+# IDE / editor
+.claude/
+.cursor/
+.idea/
+.vscode/

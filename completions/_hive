@@ -1,0 +1,210 @@
+#compdef hive
+
+_hive() {
+  local -a commands
+  commands=(
+    'new:Create a session and attach'
+    'attach:Attach to a session'
+    'a:Attach to a session (alias)'
+    'last:Attach the most-recently-attached session'
+    'peek:Print the last N lines of a pane without attaching'
+    'card:Show a formatted summary of a card'
+    'summarize:Regenerate the local-LLM card summary via Ollama'
+    'tail:Live-stream a session pane'
+    'send:Send text to a session without attaching'
+    'done:Archive a card (10s undo window)'
+    'resume:Re-launch a Done/Archived card with claude --resume'
+    'rm:Hard-delete a card (aliases: kill)'
+    'kill:Hard-delete a card'
+    'list:List all cards'
+    'ls:List all cards (alias)'
+    'watch:Live-update the card list'
+    'status:Summary (active, needs input, cost)'
+    'search:Grep panes + Claude transcripts'
+    'cd:Print a card worktree path'
+    'open:Open worktree in $EDITOR'
+    'doctor:Environment sanity checks'
+    'tui:Launch the TUI kanban board'
+    'daemon:Run background poller (headless)'
+    'scan:List tmux sessions available for import'
+    'import:Import an existing tmux or Claude session'
+    'create:Deprecated — use new'
+    'config:Validate config and repo paths'
+    'template:Manage session templates (list|show|create)'
+    'version:Print version'
+    'help:Show help'
+  )
+
+  _arguments -C \
+    '1:command:->cmd' \
+    '*::arg:->args'
+
+  case $state in
+    cmd)
+      _describe 'command' commands
+      ;;
+    args)
+      case $words[1] in
+        new|create)
+          _arguments \
+            '(-r --repo)'{-r,--repo}'[Repo name]:repo:->repos' \
+            '(-t --title)'{-t,--title}'[Title]:title' \
+            '(-p --prompt)'{-p,--prompt}'[Initial prompt]:prompt' \
+            '(-b --branch)'{-b,--branch}'[Branch name]:branch' \
+            '(-w --worktree)'{-w,--worktree}'[Existing worktree path]:worktree:_files -/'
+          if [[ $state == repos ]]; then
+            _hive_repos
+          fi
+          ;;
+        attach|a|resume|cd|card)
+          _hive_cards
+          ;;
+        summarize)
+          _arguments \
+            '(-a --all)'{-a,--all}'[Every card]' \
+            '(-f --force)'{-f,--force}'[Regenerate even if cached is fresh]' \
+            '*:card:->cards'
+          if [[ $state == cards ]]; then
+            _hive_cards
+          fi
+          ;;
+        peek|tail)
+          _arguments \
+            '(-n --lines)'{-n,--lines}'[Number of lines]:n' \
+            '*:card:->cards'
+          if [[ $state == cards ]]; then
+            _hive_cards
+          fi
+          ;;
+        send)
+          _arguments \
+            '(-e --edit)'{-e,--edit}'[Compose in $EDITOR]' \
+            '*:arg:->cards'
+          if [[ $state == cards ]]; then
+            _hive_cards
+          fi
+          ;;
+        done)
+          _arguments \
+            '(-y --yes)'{-y,--yes}'[Skip undo window]' \
+            '--delete-worktree[Remove the worktree on archive]' \
+            '--keep-worktree[Keep the worktree]' \
+            '*:card:->cards'
+          if [[ $state == cards ]]; then
+            _hive_cards
+          fi
+          ;;
+        rm|kill)
+          _arguments \
+            '(-y --yes)'{-y,--yes}'[Skip confirmation]' \
+            '--delete-worktree[Also remove the worktree]' \
+            '*:card:->cards'
+          if [[ $state == cards ]]; then
+            _hive_cards
+          fi
+          ;;
+        open)
+          _arguments \
+            '--finder[Open in Finder (macOS)]' \
+            '*:card:->cards'
+          if [[ $state == cards ]]; then
+            _hive_cards
+          fi
+          ;;
+        ls|list)
+          _arguments \
+            '(-r --repo)'{-r,--repo}'[Filter by repo]:repo:->repos' \
+            '(-s --status)'{-s,--status}'[Filter by status]:status:(working idle needs_input errored paused archived unknown)' \
+            '(-c --column)'{-c,--column}'[Filter by column]:column:(active done archived backlog)' \
+            '--since[Updated within duration]:dur' \
+            '--json[JSON output]' \
+            '(-f --format)'{-f,--format}'[Output format]:format:(table tsv json)'
+          if [[ $state == repos ]]; then
+            _hive_repos
+          fi
+          ;;
+        watch)
+          _arguments \
+            '(-i --interval)'{-i,--interval}'[Refresh interval]:duration:(2s 5s 1s)' \
+            '(-r --repo)'{-r,--repo}'[Filter by repo]:repo:->repos' \
+            '--status[Filter by status]:status' \
+            '(-c --column)'{-c,--column}'[Filter by column]:column:(active done archived backlog)' \
+            '--since[Updated within duration]:dur'
+          if [[ $state == repos ]]; then
+            _hive_repos
+          fi
+          ;;
+        status)
+          _arguments \
+            '(-s --short)'{-s,--short}'[One-line PS1 output]' \
+            '--json[Structured JSON output]'
+          ;;
+        import)
+          _arguments \
+            '(-r --repo)'{-r,--repo}'[Repo name]:repo' \
+            '(-t --title)'{-t,--title}'[Title]:title' \
+            '--tmux[Tmux session name]:session' \
+            '--session-id[Claude session UUID]:uuid' \
+            '--cwd[Working directory]:cwd:_files -/'
+          ;;
+        template)
+          local -a subcmds
+          subcmds=('list:List templates' 'show:Show template details' 'create:Create a template')
+          _describe 'template command' subcmds
+          ;;
+        search)
+          _arguments \
+            '--cards-only[Skip transcripts]' \
+            '--transcripts-only[Skip pane captures]' \
+            '(-n --limit)'{-n,--limit}'[Max matches per card]:n'
+          ;;
+        config)
+          local -a subcmds
+          subcmds=('check:Validate config and repo paths')
+          _describe 'config command' subcmds
+          ;;
+        help)
+          local -a help_cmds
+          help_cmds=(
+            'new:hive new — create and attach'
+            'attach:hive attach — resolve + attach'
+            'send:hive send — send text to a session'
+            'done:hive done — archive with undo'
+            'resume:hive resume — resume a Done card'
+            'rm:hive rm/kill — hard-delete'
+            'ls:hive ls — filtered listing'
+            'status:hive status — summary'
+            'watch:hive watch — live-update'
+            'search:hive search — grep panes + transcripts'
+            'doctor:hive doctor — environment checks'
+          )
+          _describe 'help topic' help_cmds
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_hive_cards() {
+  local -a cards
+  # Prefer JSON for reliable parsing when ls exposes it.
+  cards=(${(f)"$(hive ls --json 2>/dev/null | python3 -c 'import json,sys
+for c in json.load(sys.stdin):
+    print(f"{c[\"id\"][:8]}:{c[\"title\"]}")
+' 2>/dev/null)"})
+  if (( ${#cards} == 0 )); then
+    # Fallback: parse the plain-text table.
+    cards=(${(f)"$(hive ls 2>/dev/null | tail -n +2 | awk '{print $1":"$2}')"})
+  fi
+  _describe 'card' cards
+}
+
+_hive_repos() {
+  local -a repos
+  if [[ -f ~/.hive/config.yaml ]]; then
+    repos=(${(f)"$(grep '^\s*- name:' ~/.hive/config.yaml | sed 's/.*name:\s*//')"})
+  fi
+  _describe 'repo' repos
+}
+
+_hive "$@"
