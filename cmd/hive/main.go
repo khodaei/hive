@@ -204,7 +204,7 @@ func runPickerOrHelp() {
 			}
 			continue
 		default:
-			attachToCard(s, card)
+			attachToCard(s, cfg, card)
 			return
 		}
 	}
@@ -280,16 +280,26 @@ func unarchiveLatest(s *store.Store, cfg config.Config) bool {
 
 // attachToCard attaches the current terminal to a card's tmux session, stamps
 // last_attached_at, and handles the inside-tmux (switch-client) case.
-func attachToCard(s *store.Store, c store.Card) {
-	if c.ColumnID == store.ColumnArchived || c.Status == store.StatusArchived {
-		log.Fatalf("card %s (%s) is archived — use `hive resume %s` instead", c.ID, c.Title, c.ID)
+// If the card has no live tmux session (paused / done / tmux died), this
+// transparently resumes it first — creating a new tmux session, running
+// `claude --resume <id>` (or just `claude` if no session ID), and flipping
+// the card back to Active / Working.
+func attachToCard(s *store.Store, cfg config.Config, c store.Card) {
+	// Archived-column cards are deliberately out of reach: there's no
+	// tmux session and we don't auto-resume them without an explicit verb.
+	if c.ColumnID == store.ColumnArchived {
+		log.Fatalf("card %s (%s) is in the Archived column — use `hive resume %s` instead", c.ID, c.Title, c.ID)
 	}
-	if c.TmuxSession == "" {
-		log.Fatalf("card %s (%s) has no tmux session", c.ID, c.Title)
+
+	// If there's no live tmux session, auto-resume first.
+	if c.TmuxSession == "" || !tmux.HasSession(c.TmuxSession) {
+		resumed, err := resumeSession(s, cfg, c)
+		if err != nil {
+			log.Fatalf("resume %s: %v", c.ID, err)
+		}
+		c = resumed
 	}
-	if !tmux.HasSession(c.TmuxSession) {
-		log.Fatalf("tmux session %s for card %s is not running", c.TmuxSession, c.ID)
-	}
+
 	if err := s.UpdateCardLastAttached(c.ID); err != nil {
 		log.Printf("stamp last_attached_at: %v", err)
 	}
@@ -306,6 +316,38 @@ func attachToCard(s *store.Store, c store.Card) {
 	if err := cmd.Run(); err != nil {
 		log.Fatalf("tmux attach: %v", err)
 	}
+}
+
+// resumeSession re-creates a tmux session for a card that doesn't have a live
+// one, runs `claude --resume <session_id>` (or just `claude` when no Claude
+// session ID is known), and flips the card back to col=Active / status=Working.
+// Used both by `hive resume` and transparently by attachToCard when the user
+// hits Enter on a paused / done card in the picker.
+func resumeSession(s *store.Store, cfg config.Config, card store.Card) (store.Card, error) {
+	if card.WorktreePath == "" {
+		return card, fmt.Errorf("card has no worktree path")
+	}
+	tmuxName := cfg.TmuxPrefix + card.ID
+	if !tmux.HasSession(tmuxName) {
+		if err := tmux.NewSession(tmuxName, card.WorktreePath); err != nil {
+			return card, fmt.Errorf("create tmux session: %w", err)
+		}
+		claudeCmd := cfg.ClaudeCmd
+		if card.ClaudeSessionID != "" {
+			claudeCmd = fmt.Sprintf("%s --resume %s", cfg.ClaudeCmd, card.ClaudeSessionID)
+		}
+		if err := tmux.SendKeys(tmuxName, claudeCmd); err != nil {
+			return card, fmt.Errorf("launch claude: %w", err)
+		}
+	}
+	s.UpdateCardColumn(card.ID, store.ColumnActive)
+	s.UpdateCardStatus(card.ID, store.StatusWorking)
+	s.UpdateCardTmuxSession(card.ID, tmuxName)
+
+	card.TmuxSession = tmuxName
+	card.ColumnID = store.ColumnActive
+	card.Status = store.StatusWorking
+	return card, nil
 }
 
 // --- TUI ---
@@ -737,7 +779,7 @@ func runAttach(args []string) {
 	if len(args) > 0 {
 		query = strings.Join(args, " ")
 	}
-	_, s := mustLoadConfigAndStore()
+	cfg, s := mustLoadConfigAndStore()
 	defer s.Close()
 
 	cards := livePickCards(s)
@@ -749,7 +791,7 @@ func runAttach(args []string) {
 	if !ok {
 		return
 	}
-	attachToCard(s, card)
+	attachToCard(s, cfg, card)
 }
 
 // livePickCards returns cards eligible for the picker/resolve path. Archived
@@ -771,13 +813,13 @@ func livePickCards(s *store.Store) []store.Card {
 
 // runLast backs `hive last` / `hive -`: attach the most-recently-attached card.
 func runLast() {
-	_, s := mustLoadConfigAndStore()
+	cfg, s := mustLoadConfigAndStore()
 	defer s.Close()
 	card, err := s.FindLastAttachedCard()
 	if err != nil {
 		log.Fatalf("no previously-attached card on record. Use `hive` to pick one.")
 	}
-	attachToCard(s, card)
+	attachToCard(s, cfg, card)
 }
 
 // --- Peek ---
@@ -1581,35 +1623,9 @@ func runResume(args []string) {
 	if !ok {
 		return
 	}
-
-	tmuxName := cfg.TmuxPrefix + card.ID
-	if tmux.HasSession(tmuxName) {
-		// Session survived an unclean archive — attach, don't re-create.
-		fmt.Printf("Existing tmux session %s found — attaching.\n", tmuxName)
-	} else {
-		if card.WorktreePath == "" {
-			log.Fatalf("card %s has no worktree path; cannot resume", card.ID)
-		}
-		if err := tmux.NewSession(tmuxName, card.WorktreePath); err != nil {
-			log.Fatalf("create tmux session: %v", err)
-		}
-		claudeCmd := cfg.ClaudeCmd
-		if card.ClaudeSessionID != "" {
-			claudeCmd = fmt.Sprintf("%s --resume %s", cfg.ClaudeCmd, card.ClaudeSessionID)
-		}
-		if err := tmux.SendKeys(tmuxName, claudeCmd); err != nil {
-			log.Fatalf("launch claude: %v", err)
-		}
-	}
-
-	s.UpdateCardColumn(card.ID, store.ColumnActive)
-	s.UpdateCardStatus(card.ID, store.StatusWorking)
-	s.UpdateCardTmuxSession(card.ID, tmuxName)
-
-	card.TmuxSession = tmuxName
-	card.ColumnID = store.ColumnActive
-	card.Status = store.StatusWorking
-	attachToCard(s, card)
+	// attachToCard handles both paths transparently now: if there's no live
+	// tmux it resumes, otherwise it just attaches. Use that one entry point.
+	attachToCard(s, cfg, card)
 }
 
 // runDelete backs `hive rm` and `hive kill` (aliases). Hard-deletes the card
