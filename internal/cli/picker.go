@@ -116,14 +116,16 @@ func colorize(s, color string) string {
 // room for "needs_input" in the STATUS column. Fields are padded *before*
 // ANSI color codes are applied so escape sequences don't throw off the count.
 const (
-	colTitle  = 25
-	colRepo   = 14
-	colStatus = 10 // "❓ needs_input" truncates to "❓ needs_i…" — still readable
-	colAge    = 4
+	colTitle  = 26 // TITLE picks up 1 of the 3 cells freed from STATUS.
+	colRepo   = 16 // REPO picks up the other 2 (so full repo names like
+	//              'advertiser-360' no longer truncate).
+	colStatus = 7  // Tight. "❓ needs_input" → "❓ need…", "⚙ working" →
+	//              "⚙ work…". The icon still carries the attention-grab.
+	colAge = 4
 )
 
 // formatRow renders one card as a tab-separated row for the picker.
-// Columns: ID \t TITLE \t REPO \t STATUS \t AGE.
+// Columns: ID \t TITLE \t STATUS \t REPO \t AGE.
 // The ID is hidden via fzf's --with-nth=2..; it stays as field 1 so --preview
 // can reference {1}. Cost / full metadata live in the preview sidebar.
 func formatRow(c store.Card) string {
@@ -138,8 +140,8 @@ func formatRow(c store.Card) string {
 	fields := []string{
 		c.ID,
 		title,
-		colorize(repo, ansiCyan),
 		colorizeStatus(c.Status, status),
+		colorize(repo, ansiCyan),
 		colorize(age, ansiDim),
 	}
 	return strings.Join(fields, "\t")
@@ -191,8 +193,8 @@ func colorizeStatus(st store.Status, padded string) string {
 func pickerHeader(withActions bool) string {
 	cols := strings.Join([]string{
 		padRunes("TITLE", colTitle),
-		padRunes("REPO", colRepo),
 		padRunes("STATUS", colStatus),
+		padRunes("REPO", colRepo),
 		"AGE",
 	}, "\t")
 	hint := "↑/↓ select · enter attach · ctrl-/ toggle details · esc quit"
