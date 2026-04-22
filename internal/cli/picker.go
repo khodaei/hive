@@ -116,12 +116,10 @@ func colorize(s, color string) string {
 // room for "needs_input" in the STATUS column. Fields are padded *before*
 // ANSI color codes are applied so escape sequences don't throw off the count.
 const (
-	colTitle  = 26 // TITLE picks up 1 of the 3 cells freed from STATUS.
-	colRepo   = 16 // REPO picks up the other 2 (so full repo names like
-	//              'advertiser-360' no longer truncate).
-	colStatus = 7  // Tight. "❓ needs_input" → "❓ need…", "⚙ working" →
-	//              "⚙ work…". The icon still carries the attention-grab.
-	colAge = 4
+	colTitle  = 25
+	colRepo   = 16 // Full names like 'advertiser-360' (14) no longer crowd.
+	colStatus = 10 // Fits every status except 'needs_input' (→ 'needs_i…').
+	colAge    = 4
 )
 
 // formatRow renders one card as a tab-separated row for the picker.
