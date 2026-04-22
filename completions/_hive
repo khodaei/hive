@@ -18,6 +18,7 @@ _hive() {
     'kill:Hard-delete a card'
     'list:List all cards'
     'ls:List all cards (alias)'
+    'archived:List archived cards (alias for ls -s archived)'
     'watch:Live-update the card list'
     'status:Summary (active, needs input, cost)'
     'search:Grep panes + Claude transcripts'

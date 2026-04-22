@@ -17,6 +17,7 @@ function __hive_commands
     echo -e "kill\tHard-delete a card (alias)"
     echo -e "list\tList all cards"
     echo -e "ls\tList all cards (alias)"
+    echo -e "archived\tList archived cards"
     echo -e "watch\tLive-update the card list"
     echo -e "status\tSummary"
     echo -e "search\tGrep panes + transcripts"
@@ -41,7 +42,7 @@ for c in json.load(sys.stdin):
 ' 2>/dev/null
 end
 
-set -l __hive_subs new attach a last peek card summarize tail send done resume rm kill list ls watch status search cd open doctor tui daemon scan import create config template version help
+set -l __hive_subs new attach a last peek card summarize tail send done resume rm kill list ls archived watch status search cd open doctor tui daemon scan import create config template version help
 complete -c hive -n "not __fish_seen_subcommand_from $__hive_subs" -f -a "(__hive_commands)"
 
 # Subcommand: attach-style cards

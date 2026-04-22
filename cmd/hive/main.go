@@ -111,6 +111,11 @@ func main() {
 		runDaemon()
 	case "list", "ls":
 		runList(os.Args[2:])
+	case "archived":
+		// Thin alias for `hive ls -s archived` — lets users type `hive archived`
+		// to browse everything they've archived (covers both col=Done and
+		// col=Archived since both have status=archived after `hive done`).
+		runList(append([]string{"-s", "archived"}, os.Args[2:]...))
 	case "watch":
 		runWatch(os.Args[2:])
 	case "create":
@@ -2738,6 +2743,7 @@ Create / attach:
 Inspect / interact:
   ls, list [flags]      Filtered listing (-r repo, -s status, -c column,
                         --since <dur>, --json, -f {table|tsv|json}).
+  archived [ls flags]   Alias for 'ls -s archived' — the archived card view.
   status [--short|--json]
                         One-line (PS1) or structured summary.
   watch [--interval 2s] [ls flags]
@@ -2932,7 +2938,8 @@ var verbHelp = map[string]string{
   Example:
     hive ls --repo flowrida --status needs_input --since 1h
 `,
-	"list":   "See 'hive help ls'.",
+	"list":     "See 'hive help ls'.",
+	"archived": "hive archived [ls flags]\n\n  Alias for 'hive ls -s archived'. Shows every card with status=archived\n  (covers both col=Done and col=Archived). Accepts the same flags as ls:\n  --repo, --since, --json, -f, etc.\n",
 	"watch":  "hive watch [--interval 2s] [ls flags]\n\n  Live-redraw the card list. Accepts every filter flag 'hive ls' accepts.\n  --interval, -i <dur>    Refresh interval (>= 250ms). Default 2s.\n",
 	"status": "hive status [--short|--json]\n\n  Summarize cards:\n    default: multi-line human summary\n    -s, --short    one-line PS1 ('3⚙ 1❓ $2.47')\n    --json         StatusSummary object for scripting\n",
 	"search": `hive search <term> [flags]
