@@ -654,16 +654,22 @@ func runPRReview(args []string) {
 		os.Exit(exitGeneral)
 	}
 
+	// Path 1 (fresh): fetch refs/pull/<num>/head into a local pr-<num> branch,
+	// then 'git worktree add' it.
+	// Path 2 (reuse): the worktree + branch already exist from a prior run —
+	// skip the fetch (git refuses to update a branch checked out in a
+	// worktree) and just reuse what's there.
 	branch := fmt.Sprintf("pr-%d", num)
 	worktreePath := filepath.Join(repoCfg.Path, branch)
-	fetchCmd := exec.Command("git", "-C", repoCfg.Path, "fetch", "--force", "origin",
-		fmt.Sprintf("refs/pull/%d/head:%s", num, branch))
-	if out, err := fetchCmd.CombinedOutput(); err != nil {
-		exitWith(exitGeneral, "pr-review: git fetch: %s: %v", strings.TrimSpace(string(out)), err)
-	}
 	if _, err := os.Stat(worktreePath); err == nil {
-		fmt.Printf("Worktree %s already exists — reusing.\n", worktreePath)
+		fmt.Printf("Worktree %s already exists — reusing (not fetching).\n", worktreePath)
+		fmt.Println("  If you want the latest PR head: git -C " + worktreePath + " pull")
 	} else {
+		fetchCmd := exec.Command("git", "-C", repoCfg.Path, "fetch", "--force", "origin",
+			fmt.Sprintf("refs/pull/%d/head:%s", num, branch))
+		if out, err := fetchCmd.CombinedOutput(); err != nil {
+			exitWith(exitGeneral, "pr-review: git fetch: %s: %v", strings.TrimSpace(string(out)), err)
+		}
 		wtCmd := exec.Command("git", "-C", repoCfg.Path, "worktree", "add", worktreePath, branch)
 		if out, err := wtCmd.CombinedOutput(); err != nil {
 			exitWith(exitGeneral, "pr-review: git worktree add: %s: %v", strings.TrimSpace(string(out)), err)
