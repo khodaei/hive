@@ -103,6 +103,21 @@ func main() {
 		return
 	}
 
+	// Global `<verb> --help` / `<verb> -h` interception: any verb seen with a
+	// help flag in its args prints the verb's long-form help instead of
+	// running. Handles nested subverbs like `hive new pr-review --help`.
+	if verb := os.Args[1]; verb != "help" && verb != "--help" && verb != "-h" {
+		rest := os.Args[2:]
+		if hasHelpFlag(rest) {
+			helpKey := verb
+			if verb == "new" && len(rest) > 0 && rest[0] == "pr-review" {
+				helpKey = "pr-review"
+			}
+			printVerbHelp(helpKey)
+			return
+		}
+	}
+
 	switch os.Args[1] {
 	case "new":
 		runNew(os.Args[2:])
@@ -3110,6 +3125,20 @@ var verbHelp = map[string]string{
 `,
 	"daemon":  "hive daemon\n\n  Run the poller in the foreground, no TUI. Logs to ~/.hive/daemon.log.\n",
 	"version": "hive version\n\n  Print the build version.\n",
+}
+
+// hasHelpFlag reports whether --help / -h / -help appears anywhere in args.
+// We scan linearly rather than rely on verb-specific flag parsers so that a
+// help request short-circuits before any side effects (creating worktrees,
+// tmux sessions, etc.).
+func hasHelpFlag(args []string) bool {
+	for _, a := range args {
+		switch a {
+		case "--help", "-h", "-help":
+			return true
+		}
+	}
+	return false
 }
 
 // printVerbHelp writes verb-specific help or falls back to the top-level usage.
