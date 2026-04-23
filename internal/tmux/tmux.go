@@ -51,6 +51,26 @@ func SendKeysLiteral(session, keys string) error {
 	return nil
 }
 
+// Paste pastes a block of text into a tmux session via load-buffer +
+// paste-buffer. This is the right primitive for multi-line text — the block
+// is delivered as one bracketed-paste event so apps like Claude Code that
+// treat a bare Enter as "submit" don't prematurely finalize the input at the
+// first newline.
+func Paste(session, text string) error {
+	const bufName = "hive-prompt"
+	load := exec.Command("tmux", "load-buffer", "-b", bufName, "-")
+	load.Stdin = strings.NewReader(text)
+	if out, err := load.CombinedOutput(); err != nil {
+		return fmt.Errorf("tmux load-buffer: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	paste := exec.Command("tmux", "paste-buffer", "-b", bufName, "-t", session)
+	if out, err := paste.CombinedOutput(); err != nil {
+		return fmt.Errorf("tmux paste-buffer: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	_ = exec.Command("tmux", "delete-buffer", "-b", bufName).Run()
+	return nil
+}
+
 // CapturePaneFull captures the full scrollback history of a tmux pane.
 func CapturePaneFull(session string) (string, error) {
 	cmd := exec.Command("tmux", "capture-pane", "-p", "-t", session, "-S", "-1000")

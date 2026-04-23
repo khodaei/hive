@@ -940,12 +940,14 @@ func newCreate(title, prompt, repoName, branchOverride, worktreeOverride string,
 		}
 		go func(session, text, cid string) {
 			defer close(promptDone)
-			// Fixed 12-second delay gives Claude time to boot; settings
-			// (enabledMcpjsonServers) should prevent MCP dialogs from blocking.
-			// Clear the card's PendingPrompt on success so a concurrent daemon
-			// won't re-send.
+			// Fixed 12-second delay gives Claude time to boot. Use tmux
+			// paste-buffer so multi-line prompts (e.g. the default
+			// pr-review prompt) arrive as one bracketed-paste event
+			// instead of per-line Enter keystrokes (Claude submits on
+			// bare Enter, so send-keys -l on a multi-line prompt only
+			// delivers the first line).
 			time.Sleep(12 * time.Second)
-			if err := tmux.SendKeysLiteral(session, text); err != nil {
+			if err := tmux.Paste(session, text); err != nil {
 				log.Printf("send prompt: %v", err)
 				return
 			}

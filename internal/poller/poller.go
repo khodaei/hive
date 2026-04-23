@@ -198,9 +198,15 @@ func (p *Poller) checkCard(card store.Card) {
 				log.Printf("poller: delaying pending prompt for %s (%.0fs since creation)", card.ID, startupElapsed.Seconds())
 			} else {
 				log.Printf("poller: sending pending prompt to %s", card.ID)
-				if err := tmux.SendKeys(card.TmuxSession, card.PendingPrompt); err != nil {
+				// Use paste-buffer so multi-line prompts (e.g. the default
+				// pr-review prompt) arrive intact instead of being split
+				// on the first newline.
+				if err := tmux.Paste(card.TmuxSession, card.PendingPrompt); err != nil {
 					log.Printf("poller: send pending prompt: %v", err)
 				} else {
+					time.Sleep(300 * time.Millisecond)
+					// Submit the pasted block.
+					_ = exec.Command("tmux", "send-keys", "-t", card.TmuxSession, "Enter").Run()
 					p.store.UpdateCardPendingPrompt(card.ID, "")
 					p.store.UpdateCardStatus(card.ID, store.StatusWorking)
 				}
