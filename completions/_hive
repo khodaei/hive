@@ -3,7 +3,8 @@
 _hive() {
   local -a commands
   commands=(
-    'new:Create a session and attach (or: new pr-review <url>)'
+    'new:Create a session and attach'
+    'pr-review:Review a pull request in a new worktree'
     'attach:Attach to a session'
     'a:Attach to a session (alias)'
     'last:Attach the most-recently-attached session'
@@ -45,23 +46,23 @@ _hive() {
     args)
       case $words[1] in
         new)
-          # Nested subverb: `hive new pr-review <url>`.
-          if (( CURRENT == 3 )) && [[ $words[2] == pr-review ]]; then
-            _arguments \
-              '1:pr-url:' \
-              '(-d --bg --detach)'{-d,--bg,--detach}'[Run in background]' \
-              '(-p --prompt)'{-p,--prompt}'[Prompt override]:prompt' \
-              '(-r --repo)'{-r,--repo}'[Repo name]:repo:->repos'
-          else
-            _arguments \
-              '(-r --repo)'{-r,--repo}'[Repo name]:repo:->repos' \
-              '(-t --title)'{-t,--title}'[Title]:title' \
-              '(-p --prompt)'{-p,--prompt}'[Initial prompt]:prompt' \
-              '(-b --branch)'{-b,--branch}'[Branch name]:branch' \
-              '(-w --worktree)'{-w,--worktree}'[Existing worktree path]:worktree:_files -/' \
-              '(-d --bg --detach)'{-d,--bg,--detach}'[Run in background, stay in shell]' \
-              '1:subverb or title:((pr-review\:"Review a pull request"))'
+          _arguments \
+            '(-r --repo)'{-r,--repo}'[Repo name]:repo:->repos' \
+            '(-t --title)'{-t,--title}'[Title]:title' \
+            '(-p --prompt)'{-p,--prompt}'[Initial prompt]:prompt' \
+            '(-b --branch)'{-b,--branch}'[Branch name]:branch' \
+            '(-w --worktree)'{-w,--worktree}'[Existing worktree path]:worktree:_files -/' \
+            '(-d --bg --detach)'{-d,--bg,--detach}'[Run in background, stay in shell]'
+          if [[ $state == repos ]]; then
+            _hive_repos
           fi
+          ;;
+        pr-review)
+          _arguments \
+            '1:pr-url:' \
+            '(-d --bg --detach)'{-d,--bg,--detach}'[Run in background]' \
+            '(-p --prompt)'{-p,--prompt}'[Prompt override]:prompt' \
+            '(-r --repo)'{-r,--repo}'[Repo name]:repo:->repos'
           if [[ $state == repos ]]; then
             _hive_repos
           fi

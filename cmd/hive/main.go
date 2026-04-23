@@ -105,15 +105,10 @@ func main() {
 
 	// Global `<verb> --help` / `<verb> -h` interception: any verb seen with a
 	// help flag in its args prints the verb's long-form help instead of
-	// running. Handles nested subverbs like `hive new pr-review --help`.
+	// running.
 	if verb := os.Args[1]; verb != "help" && verb != "--help" && verb != "-h" {
-		rest := os.Args[2:]
-		if hasHelpFlag(rest) {
-			helpKey := verb
-			if verb == "new" && len(rest) > 0 && rest[0] == "pr-review" {
-				helpKey = "pr-review"
-			}
-			printVerbHelp(helpKey)
+		if hasHelpFlag(os.Args[2:]) {
+			printVerbHelp(verb)
 			return
 		}
 	}
@@ -121,6 +116,8 @@ func main() {
 	switch os.Args[1] {
 	case "new":
 		runNew(os.Args[2:])
+	case "pr-review":
+		runPRReview(os.Args[2:])
 	case "tui":
 		runTUI()
 	case "daemon":
@@ -539,12 +536,6 @@ func runList(args []string) {
 //
 // Bare positional forms (`hive "fix auth"`, `hive .`) dispatch here too.
 func runNew(args []string) {
-	// Nested subverb: `hive new pr-review <url>`.
-	if len(args) > 0 && args[0] == "pr-review" {
-		runNewPRReview(args[1:])
-		return
-	}
-
 	var title, prompt, repoName, branchOverride, worktreeOverride string
 	detach := false
 	for i := 0; i < len(args); i++ {
@@ -599,13 +590,13 @@ func runNew(args []string) {
 	newCreate(title, prompt, repoName, branchOverride, worktreeOverride, detach)
 }
 
-// runNewPRReview backs `hive new pr-review <pr-url> [flags]`. Fetches the PR's
-// head into a local ref, creates a worktree at <repo>/pr-<num>, and launches
+// runPRReview backs `hive pr-review <pr-url> [flags]`. Fetches the PR's head
+// into a local ref, creates a worktree at <repo>/pr-<num>, and launches
 // Claude with a review prompt. Works for same-origin and fork PRs on GitHub
 // and GHE (both expose refs/pull/<num>/head server-side).
-func runNewPRReview(args []string) {
+func runPRReview(args []string) {
 	if len(args) == 0 {
-		exitWith(exitGeneral, "Usage: hive new pr-review <pr-url> [-d] [-p prompt] [-r repo]")
+		exitWith(exitGeneral, "Usage: hive pr-review <pr-url> [-d] [-p prompt] [-r repo]")
 	}
 	prURL := args[0]
 
@@ -2866,7 +2857,7 @@ Create / attach:
                         without one, runs a cardless Claude session in cwd.
                         -d / --bg stays in the shell — tmux + Claude run in
                         the background; prompt is delivered by the poller.
-  new pr-review <url>   Create a session to review a PR. Fetches the PR
+  pr-review <url>       Create a session to review a PR. Fetches the PR
                         head, creates a worktree, and prompts Claude to
                         review the diff. Accepts -d, -p, -r.
   attach, a [query]     Resolve + attach. With no query, opens the picker.
@@ -2937,7 +2928,7 @@ Shell completions:
 // verbHelp holds the long-form help text for each verb. Keep entries short
 // (6–14 lines) and include a usage line + flag reference + an example.
 var verbHelp = map[string]string{
-	"pr-review": `hive new pr-review <pr-url> [flags]
+	"pr-review": `hive pr-review <pr-url> [flags]
 
   Spin up a new Claude session dedicated to reviewing a pull request.
   Fetches refs/pull/<num>/head into a local branch 'pr-<num>', creates a
@@ -2952,8 +2943,8 @@ var verbHelp = map[string]string{
     -r, --repo <name>    Skip auto-detection; use this configured repo.
 
   Example:
-    hive new pr-review https://github.com/acme/api/pull/317
-    hive new pr-review https://github.com/acme/api/pull/317 -d
+    hive pr-review https://github.com/acme/api/pull/317
+    hive pr-review https://github.com/acme/api/pull/317 -d
 `,
 	"new": `hive new [title] [flags]
 

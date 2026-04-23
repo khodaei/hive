@@ -2,7 +2,7 @@
 # Install: source this file from your .bashrc, or symlink into /etc/bash_completion.d/
 
 _hive_commands() {
-  echo "new attach a last peek card summarize tail send done resume rm kill list ls archived watch status search cd open doctor tui daemon import config template version help"
+  echo "new pr-review attach a last peek card summarize tail send done resume rm kill list ls archived watch status search cd open doctor tui daemon import config template version help"
 }
 
 _hive_card_ids() {
@@ -86,12 +86,10 @@ _hive() {
       COMPREPLY=($(compgen -W "--short --json -s" -- "$cur"))
       ;;
     new)
-      # Nested subverb: `hive new pr-review <url>`.
-      if (( cword == 3 )) && [[ "${words[2]}" == pr-review ]]; then
-        COMPREPLY=($(compgen -W "--bg --detach --prompt --repo -d -p -r" -- "$cur"))
-      else
-        COMPREPLY=($(compgen -W "pr-review --repo --title --prompt --branch --worktree --bg --detach -r -t -p -b -w -d" -- "$cur"))
-      fi
+      COMPREPLY=($(compgen -W "--repo --title --prompt --branch --worktree --bg --detach -r -t -p -b -w -d" -- "$cur"))
+      ;;
+    pr-review)
+      COMPREPLY=($(compgen -W "--bg --detach --prompt --repo -d -p -r" -- "$cur"))
       ;;
     template)
       COMPREPLY=($(compgen -W "list show create" -- "$cur"))

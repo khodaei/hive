@@ -3,6 +3,7 @@
 
 function __hive_commands
     echo -e "new\tCreate a session and attach"
+    echo -e "pr-review\tReview a pull request in a new worktree"
     echo -e "attach\tAttach to a session"
     echo -e "a\tAttach (alias)"
     echo -e "last\tAttach the most-recently-attached session"
@@ -41,7 +42,7 @@ for c in json.load(sys.stdin):
 ' 2>/dev/null
 end
 
-set -l __hive_subs new attach a last peek card summarize tail send done resume rm kill list ls archived watch status search cd open doctor tui daemon import config template version help
+set -l __hive_subs new pr-review attach a last peek card summarize tail send done resume rm kill list ls archived watch status search cd open doctor tui daemon import config template version help
 complete -c hive -n "not __fish_seen_subcommand_from $__hive_subs" -f -a "(__hive_commands)"
 
 # Subcommand: attach-style cards
@@ -62,8 +63,6 @@ complete -c hive -n "__fish_seen_subcommand_from new" -l branch -s b -d "Branch"
 complete -c hive -n "__fish_seen_subcommand_from new" -l worktree -s w -d "Worktree"
 complete -c hive -n "__fish_seen_subcommand_from new" -l bg -s d -d "Background — skip attach"
 
-# Nested subverb: `hive new pr-review <url>`
-complete -c hive -n "__fish_seen_subcommand_from new; and not __fish_seen_subcommand_from pr-review" -f -a "pr-review" -d "Review a pull request"
 complete -c hive -n "__fish_seen_subcommand_from pr-review" -l bg -s d -d "Background — skip attach"
 complete -c hive -n "__fish_seen_subcommand_from pr-review" -l prompt -s p -d "Prompt override"
 complete -c hive -n "__fish_seen_subcommand_from pr-review" -l repo -s r -d "Repo override"
