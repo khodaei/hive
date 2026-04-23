@@ -168,6 +168,12 @@ func main() {
 		runTemplate()
 	case "version":
 		fmt.Printf("hive %s\n", version)
+	case "_picker-rows":
+		runPickerRows()
+	case "_wizard-new":
+		runWizardNew()
+	case "_wizard-pr-review":
+		runWizardPRReview()
 	case "--help", "-h", "help":
 		if len(os.Args) >= 3 {
 			printVerbHelp(os.Args[2])
@@ -253,6 +259,131 @@ func visiblePickCards(s *store.Store) []store.Card {
 		out = append(out, c)
 	}
 	return out
+}
+
+// runPickerRows backs the hidden `hive _picker-rows` verb — prints the
+// visible (non-archived) cards as fzf-formatted rows on stdout. Invoked
+// by fzf's `reload(...)` binding after an in-picker wizard creates a new
+// session, so the list redraws without the user having to exit the picker.
+func runPickerRows() {
+	_, s := mustLoadConfigAndStore()
+	defer s.Close()
+	fmt.Print(cli.FormatPickerRows(visiblePickCards(s)))
+}
+
+// runWizardNew backs the hidden `hive _wizard-new` verb — the in-picker
+// wizard for creating a new session. Walks title → repo → optional prompt,
+// then reuses newCreate() in detach mode so the caller (fzf's execute()
+// binding) returns promptly and the picker redraws via the chained reload.
+//
+// Errors cause a "Press Enter to return" pause so the message doesn't flash
+// past when fzf resumes. Empty title = cancel (silent).
+func runWizardNew() {
+	cfg, s := mustLoadConfigAndStore()
+
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "── New hive session ──")
+	fmt.Fprintln(os.Stderr, "")
+
+	in := bufio.NewReader(os.Stdin)
+
+	title := promptLine(in, "Title (Enter to cancel): ")
+	if title == "" {
+		s.Close()
+		return
+	}
+
+	// Repo: auto if one, menu if many, "(none)" option always present.
+	syncRepos(cfg, s)
+	repoName := pickRepoForWizard(in, cfg.Repos)
+	s.Close()
+
+	prompt := promptLine(in, "Starting prompt (Enter to skip, @file.md for file): ")
+	if prompt != "" {
+		if expanded, err := cli.ResolvePromptArg(prompt); err != nil {
+			wizardError("prompt: %v", err)
+			return
+		} else {
+			prompt = expanded
+		}
+	}
+
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "Creating session…")
+	newCreate(title, prompt, repoName, "", "", true /* detach */)
+}
+
+// runWizardPRReview backs the hidden `hive _wizard-pr-review` verb. Asks
+// only for the PR URL (everything else — repo detection, branch, worktree,
+// default prompt — is handled by runPRReview), then delegates with -d so
+// the wizard returns promptly to the picker.
+func runWizardPRReview() {
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "── New PR review session ──")
+	fmt.Fprintln(os.Stderr, "")
+
+	in := bufio.NewReader(os.Stdin)
+	url := promptLine(in, "PR URL (Enter to cancel): ")
+	if url == "" {
+		return
+	}
+
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "Creating PR review session…")
+	runPRReview([]string{url, "-d"})
+}
+
+// promptLine writes prompt to stderr and reads a trimmed line from in.
+// Returns "" on EOF or blank input — callers treat that as cancel.
+func promptLine(in *bufio.Reader, prompt string) string {
+	fmt.Fprint(os.Stderr, prompt)
+	line, err := in.ReadString('\n')
+	if err != nil && line == "" {
+		return ""
+	}
+	return strings.TrimSpace(line)
+}
+
+// pickRepoForWizard returns the repo name the new session should be
+// created under. One configured repo → auto-pick. None → cwd fallback.
+// Many → numbered menu with a "(cwd)" option.
+func pickRepoForWizard(in *bufio.Reader, repos []config.Repo) string {
+	if len(repos) == 0 {
+		fmt.Fprintln(os.Stderr, "Repo: (none configured — using cwd)")
+		return ""
+	}
+	if len(repos) == 1 {
+		fmt.Fprintf(os.Stderr, "Repo: %s\n", repos[0].Name)
+		return repos[0].Name
+	}
+	fmt.Fprintln(os.Stderr, "Repo:")
+	for i, r := range repos {
+		fmt.Fprintf(os.Stderr, "  %2d. %s\n", i+1, r.Name)
+	}
+	fmt.Fprintf(os.Stderr, "  %2d. (cwd — no configured repo)\n", len(repos)+1)
+	for {
+		line := promptLine(in, "Pick: ")
+		if line == "" {
+			return ""
+		}
+		n, err := strconv.Atoi(line)
+		if err != nil || n < 1 || n > len(repos)+1 {
+			fmt.Fprintln(os.Stderr, "Invalid choice.")
+			continue
+		}
+		if n == len(repos)+1 {
+			return ""
+		}
+		return repos[n-1].Name
+	}
+}
+
+// wizardError prints an error and waits for Enter so the message survives
+// fzf's post-execute redraw.
+func wizardError(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, "\nerror: "+format+"\n", args...)
+	fmt.Fprint(os.Stderr, "Press Enter to return to picker: ")
+	bufio.NewReader(os.Stdin).ReadString('\n')
 }
 
 // archiveInPlace performs the same DB + tmux state changes as `hive done -y`

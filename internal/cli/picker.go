@@ -122,6 +122,19 @@ const (
 	colAge    = 4
 )
 
+// FormatPickerRows renders the given cards as newline-separated fzf rows —
+// the exact format pickFzf feeds to fzf on stdin. Exposed so an external
+// caller (the _picker-rows helper used by fzf's reload action) can produce
+// the same layout without re-running the whole picker.
+func FormatPickerRows(cards []store.Card) string {
+	var b strings.Builder
+	for _, c := range cards {
+		b.WriteString(formatRow(c))
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
 // formatRow renders one card as a tab-separated row for the picker.
 // Columns: ID \t TITLE \t STATUS \t REPO \t AGE.
 // The ID is hidden via fzf's --with-nth=2..; it stays as field 1 so --preview
@@ -195,9 +208,9 @@ func pickerHeader(withActions bool) string {
 		padRunes("REPO", colRepo),
 		"AGE",
 	}, "\t")
-	hint := "↑/↓ select · enter attach · ctrl-/ toggle details · esc quit"
+	hint := "↑/↓ select · enter attach · ctrl-n new · ctrl-r pr-review · ctrl-/ details · esc quit"
 	if withActions {
-		hint = "↑/↓ select · enter attach · → archive · ← undo · ctrl-/ details · esc quit"
+		hint = "↑/↓ select · enter attach · → archive · ← undo · ctrl-n new · ctrl-r pr-review · ctrl-/ details · esc quit"
 	}
 	return hint + "\n" + cols
 }
@@ -290,6 +303,14 @@ func pickFzf(cards []store.Card, initialQuery string, withActions bool) (store.C
 	// shell history restored on exit). With --border=rounded that'd look
 	// heavy as a full-screen frame, so we drop the border too — the alt
 	// screen's own clearing is enough separation.
+	// Wizard bindings: ctrl-n opens the "new session" wizard, ctrl-r the
+	// "pr-review" wizard. execute() hands the TTY to the child; on exit,
+	// reload() regenerates the candidate list so the newly created card
+	// shows up without leaving the picker.
+	reloadCmd := `"$HIVE_BIN" _picker-rows`
+	wizardNewBind := `ctrl-n:execute("$HIVE_BIN" _wizard-new)+reload(` + reloadCmd + `)`
+	wizardPRBind := `ctrl-r:execute("$HIVE_BIN" _wizard-pr-review)+reload(` + reloadCmd + `)`
+
 	args := []string{
 		"--ansi",
 		"--delimiter=\t",
@@ -299,6 +320,8 @@ func pickFzf(cards []store.Card, initialQuery string, withActions bool) (store.C
 		"--preview", previewCmd,
 		"--preview-window", "right:45%:wrap:border-left",
 		"--bind", "ctrl-/:toggle-preview",
+		"--bind", wizardNewBind,
+		"--bind", wizardPRBind,
 		"--prompt", "hive❯ ",
 		"--pointer", "▶",
 		"--marker", "◆",
