@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -212,6 +213,14 @@ func (p *Poller) checkCard(card store.Card) {
 		p.detectPR(card, content)
 	}
 
+	// Auto-detect Claude session ID from the worktree's transcripts.
+	// newCreate() never learns the UUID Claude Code picks internally; without
+	// this backfill, `hive resume` can't use `claude --resume <id>` and the
+	// card's Claude ID stays blank forever.
+	if card.ClaudeSessionID == "" && card.WorktreePath != "" {
+		p.detectClaudeSession(card)
+	}
+
 	// Auto-detect branch from worktree if card branch is empty or generic
 	if card.WorktreePath != "" && (card.Branch == "" || card.Branch == "main" || card.Branch == "master") {
 		cmd := exec.Command("git", "-C", card.WorktreePath, "branch", "--show-current")
@@ -340,6 +349,30 @@ func (p *Poller) detectPR(card store.Card, content string) {
 	if match != "" {
 		log.Printf("poller: auto-detected PR for %s: %s", card.ID, match)
 		p.store.UpdateCardPRURL(card.ID, match)
+	}
+}
+
+// uuidPattern matches the 8-4-4-4-12 hex UUID shape Claude Code uses for
+// transcript filenames. Anchored so stray prefixes/suffixes don't slip in.
+var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// detectClaudeSession backfills the card's claude_session_id from the newest
+// transcript filename in the worktree's Claude project dir. Claude Code names
+// each transcript <uuid>.jsonl, and that UUID is the session ID used by
+// `claude --resume`. Safe to call every poll tick: ListTranscripts is a
+// metadata-only read and we already guard on card.ClaudeSessionID == "".
+func (p *Poller) detectClaudeSession(card store.Card) {
+	paths, err := transcripts.ListTranscripts(card.WorktreePath)
+	if err != nil || len(paths) == 0 {
+		return
+	}
+	stem := strings.TrimSuffix(filepath.Base(paths[0]), ".jsonl")
+	if !uuidPattern.MatchString(stem) {
+		return
+	}
+	log.Printf("poller: auto-detected claude session for %s: %s", card.ID, stem)
+	if err := p.store.UpdateCardClaudeSession(card.ID, stem); err != nil {
+		log.Printf("poller: update claude session for %s: %v", card.ID, err)
 	}
 }
 
