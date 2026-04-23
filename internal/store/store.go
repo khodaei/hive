@@ -281,12 +281,21 @@ func (s *Store) ListRepos() ([]Repo, error) {
 func (s *Store) InsertCard(c Card) error {
 	return s.execWrite(
 		`INSERT INTO cards (id, title, prompt, repo_name, branch, worktree_path,
-		  column_id, status, tmux_session, claude_session_id, created_at, updated_at, last_activity_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		  column_id, status, tmux_session, claude_session_id, created_at, updated_at, last_activity_at,
+		  pending_prompt, pr_url, notifications_muted)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		c.ID, c.Title, c.Prompt, c.RepoName, c.Branch, c.WorktreePath,
 		c.ColumnID, c.Status, c.TmuxSession, c.ClaudeSessionID,
 		c.CreatedAt, c.UpdatedAt, c.LastActivityAt,
+		c.PendingPrompt, c.PRURL, boolToInt(c.NotificationsMuted),
 	)
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 const cardSelectCols = `id, title, prompt, repo_name, branch, worktree_path,
