@@ -45,13 +45,23 @@ _hive() {
     args)
       case $words[1] in
         new)
-          _arguments \
-            '(-r --repo)'{-r,--repo}'[Repo name]:repo:->repos' \
-            '(-t --title)'{-t,--title}'[Title]:title' \
-            '(-p --prompt)'{-p,--prompt}'[Initial prompt]:prompt' \
-            '(-b --branch)'{-b,--branch}'[Branch name]:branch' \
-            '(-w --worktree)'{-w,--worktree}'[Existing worktree path]:worktree:_files -/' \
-            '(-d --bg --detach)'{-d,--bg,--detach}'[Run in background, stay in shell]'
+          # Nested subverb: `hive new pr-review <url>`.
+          if (( CURRENT == 3 )) && [[ $words[2] == pr-review ]]; then
+            _arguments \
+              '1:pr-url:' \
+              '(-d --bg --detach)'{-d,--bg,--detach}'[Run in background]' \
+              '(-p --prompt)'{-p,--prompt}'[Prompt override]:prompt' \
+              '(-r --repo)'{-r,--repo}'[Repo name]:repo:->repos'
+          else
+            _arguments \
+              '(-r --repo)'{-r,--repo}'[Repo name]:repo:->repos' \
+              '(-t --title)'{-t,--title}'[Title]:title' \
+              '(-p --prompt)'{-p,--prompt}'[Initial prompt]:prompt' \
+              '(-b --branch)'{-b,--branch}'[Branch name]:branch' \
+              '(-w --worktree)'{-w,--worktree}'[Existing worktree path]:worktree:_files -/' \
+              '(-d --bg --detach)'{-d,--bg,--detach}'[Run in background, stay in shell]' \
+              '1:subverb or title:((pr-review\:"Review a pull request"))'
+          fi
           if [[ $state == repos ]]; then
             _hive_repos
           fi
@@ -167,6 +177,7 @@ _hive() {
           local -a help_cmds
           help_cmds=(
             'new:hive new — create and attach'
+            'pr-review:hive new pr-review — spin up a PR review session'
             'attach:hive attach — resolve + attach'
             'send:hive send — send text to a session'
             'done:hive done — archive with undo'

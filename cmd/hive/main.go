@@ -2861,9 +2861,14 @@ Quick start:
   hive done fix-au                   Archive (3s Ctrl-C undo window).
 
 Create / attach:
-  new [title] [-p prompt] [-r repo] [-b branch] [-w worktree] [-t title]
+  new [title] [-p prompt] [-r repo] [-b branch] [-w worktree] [-t title] [-d]
                         Primary create verb. With a title, creates a card;
                         without one, runs a cardless Claude session in cwd.
+                        -d / --bg stays in the shell — tmux + Claude run in
+                        the background; prompt is delivered by the poller.
+  new pr-review <url>   Create a session to review a PR. Fetches the PR
+                        head, creates a worktree, and prompts Claude to
+                        review the diff. Accepts -d, -p, -r.
   attach, a [query]     Resolve + attach. With no query, opens the picker.
   last, -               Attach the most-recently-attached live session.
 

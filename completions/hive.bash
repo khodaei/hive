@@ -86,7 +86,12 @@ _hive() {
       COMPREPLY=($(compgen -W "--short --json -s" -- "$cur"))
       ;;
     new)
-      COMPREPLY=($(compgen -W "--repo --title --prompt --branch --worktree --bg --detach -r -t -p -b -w -d" -- "$cur"))
+      # Nested subverb: `hive new pr-review <url>`.
+      if (( cword == 3 )) && [[ "${words[2]}" == pr-review ]]; then
+        COMPREPLY=($(compgen -W "--bg --detach --prompt --repo -d -p -r" -- "$cur"))
+      else
+        COMPREPLY=($(compgen -W "pr-review --repo --title --prompt --branch --worktree --bg --detach -r -t -p -b -w -d" -- "$cur"))
+      fi
       ;;
     template)
       COMPREPLY=($(compgen -W "list show create" -- "$cur"))
