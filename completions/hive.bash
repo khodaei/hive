@@ -2,7 +2,7 @@
 # Install: source this file from your .bashrc, or symlink into /etc/bash_completion.d/
 
 _hive_commands() {
-  echo "new pr-review attach a last peek card summarize tail send done resume rm kill list ls archived watch status search cd open doctor tui daemon import config template version help"
+  echo "new pr-review attach a last peek card tail send done resume rm kill list ls archived watch status search cd open doctor tui daemon import config template version help"
 }
 
 _hive_card_ids() {
@@ -30,13 +30,6 @@ _hive() {
     card)
       if [[ "$cur" == -* ]]; then
         COMPREPLY=($(compgen -W "--json" -- "$cur"))
-      else
-        COMPREPLY=($(compgen -W "$(_hive_card_ids)" -- "$cur"))
-      fi
-      ;;
-    summarize)
-      if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "--all --force -a -f" -- "$cur"))
       else
         COMPREPLY=($(compgen -W "$(_hive_card_ids)" -- "$cur"))
       fi

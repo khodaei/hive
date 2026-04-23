@@ -2,10 +2,8 @@ package poller
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
-	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -38,8 +36,8 @@ type Poller struct {
 	stopCh     chan struct{}
 	wg         sync.WaitGroup
 
-	// ctx cancels on Stop(). Long-running background work (Ollama summary
-	// calls in particular) respects it so shutdown is bounded.
+	// ctx cancels on Stop(). Background work respects it so shutdown is
+	// bounded.
 	ctx    context.Context
 	cancel context.CancelFunc
 
@@ -47,30 +45,23 @@ type Poller struct {
 	idleStartTimes map[string]time.Time // card ID -> when idle started
 	idleNotified   map[string]bool      // card ID -> whether we already notified
 	costAlerted    map[string]bool      // card ID -> whether budget alert already fired
-
-	// Summary job serialization: at most one summary generation per card at
-	// a time. Prevents overlapping slow LLM calls from stacking up when a
-	// card flaps between statuses.
-	summaryMu       sync.Mutex
-	summaryInFlight map[string]bool
 }
 
 // New creates a new Poller.
 func New(s *store.Store, classifier *status.Classifier, cfg config.Config, onChange func(StatusChange)) *Poller {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Poller{
-		store:           s,
-		classifier:      classifier,
-		cfg:             cfg,
-		notifier:        notify.New(cfg.Notifications),
-		onChange:        onChange,
-		stopCh:          make(chan struct{}),
-		ctx:             ctx,
-		cancel:          cancel,
-		idleStartTimes:  make(map[string]time.Time),
-		costAlerted:     make(map[string]bool),
-		idleNotified:    make(map[string]bool),
-		summaryInFlight: make(map[string]bool),
+		store:          s,
+		classifier:     classifier,
+		cfg:            cfg,
+		notifier:       notify.New(cfg.Notifications),
+		onChange:       onChange,
+		stopCh:         make(chan struct{}),
+		ctx:            ctx,
+		cancel:         cancel,
+		idleStartTimes: make(map[string]time.Time),
+		costAlerted:    make(map[string]bool),
+		idleNotified:   make(map[string]bool),
 	}
 }
 
@@ -96,9 +87,8 @@ func (p *Poller) Start() {
 	}()
 }
 
-// Stop stops the polling loop and waits for it — and every background
-// goroutine tracked by p.wg (including in-flight summary jobs) — to finish.
-// Cancels p.ctx first so long-running Ollama calls return promptly.
+// Stop stops the polling loop and waits for it to finish. Cancels p.ctx
+// first so any long-running background work cancels promptly.
 func (p *Poller) Stop() {
 	p.cancel()
 	close(p.stopCh)
@@ -182,13 +172,6 @@ func (p *Poller) checkCard(card store.Card) {
 			p.maybeNotify(card, storeStatus)
 		}
 
-		// Kick off a background LLM summary refresh if the new status is in
-		// the configured trigger list. Non-blocking and fail-safe: a dead
-		// Ollama endpoint just logs once — the rest of the poll tick is
-		// unaffected and the card's cache stays as-is so the UI falls back
-		// to "Recent turns".
-		p.maybeSummarize(card, storeStatus)
-
 		// Send pending prompt when Claude reaches idle for the first time.
 		// Wait at least 10s after card creation to avoid sending into MCP/permission
 		// prompts that appear during Claude Code startup.
@@ -207,10 +190,10 @@ func (p *Poller) checkCard(card store.Card) {
 					// Wait long enough for Claude to finish ingesting the
 					// bracketed-paste block before we fire the submit — a
 					// shorter delay caused the Enter to arrive during paste
-					// processing and get eaten. C-m is the raw carriage
-					// return keycode (what pressing Return sends); more
-					// reliable across terminal/tmux configs than 'Enter'.
-					time.Sleep(1500 * time.Millisecond)
+					// processing and get eaten. 3s is generous; hive has
+					// already returned in -d mode so nothing is waiting.
+					// C-m is the raw carriage return keycode.
+					time.Sleep(3 * time.Second)
 					if err := exec.Command("tmux", "send-keys", "-t", card.TmuxSession, "C-m").Run(); err != nil {
 						log.Printf("poller: submit prompt: %v", err)
 					}
@@ -358,92 +341,6 @@ func (p *Poller) detectPR(card store.Card, content string) {
 		log.Printf("poller: auto-detected PR for %s: %s", card.ID, match)
 		p.store.UpdateCardPRURL(card.ID, match)
 	}
-}
-
-// maybeSummarize fires a background Ollama summary job for a card if the new
-// status matches the configured AutoGenerateOn list. Never blocks polling.
-func (p *Poller) maybeSummarize(card store.Card, newStatus store.Status) {
-	if !p.cfg.Summary.Enabled {
-		return
-	}
-	if card.WorktreePath == "" {
-		return
-	}
-	if !statusInList(string(newStatus), p.cfg.Summary.AutoGenerateOn) {
-		return
-	}
-
-	p.summaryMu.Lock()
-	if p.summaryInFlight[card.ID] {
-		p.summaryMu.Unlock()
-		return
-	}
-	p.summaryInFlight[card.ID] = true
-	p.summaryMu.Unlock()
-
-	// Register the goroutine with the poller's waitgroup and the shutdown
-	// context so Stop() blocks until the Ollama call returns (or timeout).
-	p.wg.Add(1)
-	go func(c store.Card) {
-		defer p.wg.Done()
-		defer func() {
-			p.summaryMu.Lock()
-			delete(p.summaryInFlight, c.ID)
-			p.summaryMu.Unlock()
-		}()
-
-		// Bail early if shutdown fired between queueing and starting.
-		if p.ctx.Err() != nil {
-			return
-		}
-
-		// Skip if transcript hasn't moved since the last cached summary —
-		// cheap metadata read, avoids hitting Ollama unnecessarily.
-		paths, err := transcripts.ListTranscripts(c.WorktreePath)
-		if err != nil || len(paths) == 0 {
-			return
-		}
-		info, err := os.Stat(paths[0])
-		if err != nil {
-			return
-		}
-		if c.SummaryTranscriptMtime >= info.ModTime().Unix() && c.Summary != "" {
-			return
-		}
-
-		res, err := transcripts.Summarize(p.ctx, c.WorktreePath, transcripts.SummaryOpts{
-			OllamaURL:   p.cfg.Summary.OllamaURL,
-			Model:       p.cfg.Summary.OllamaModel,
-			TurnsWindow: p.cfg.Summary.TurnsWindow,
-			MaxTokens:   p.cfg.Summary.MaxTokens,
-			Timeout:     time.Duration(p.cfg.Summary.TimeoutSec) * time.Second,
-		})
-		if err != nil {
-			// Context cancelled during shutdown is expected and quiet.
-			if errors.Is(err, context.Canceled) || errors.Is(err, transcripts.ErrNoTranscript) {
-				return
-			}
-			log.Printf("poller: summarize %s: %v", c.ID, err)
-			return
-		}
-		// Re-check shutdown before writing: we don't want to race with
-		// store.Close() in the daemon's shutdown path.
-		if p.ctx.Err() != nil {
-			return
-		}
-		if err := p.store.UpdateCardSummary(c.ID, res.Text, res.TranscriptMtime); err != nil {
-			log.Printf("poller: cache summary for %s: %v", c.ID, err)
-		}
-	}(card)
-}
-
-func statusInList(status string, list []string) bool {
-	for _, s := range list {
-		if s == status {
-			return true
-		}
-	}
-	return false
 }
 
 func classifierToStore(s status.Status) store.Status {

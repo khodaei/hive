@@ -32,21 +32,6 @@ type Notifications struct {
 	QuietHours     QuietHours `yaml:"quiet_hours"`
 }
 
-// Summary controls the local-LLM-via-Ollama summary feature.
-// Opt-in: requires Ollama running with the chosen model pulled. Summaries are
-// generated on status transitions listed in AutoGenerateOn and on explicit
-// `hive summarize` calls, then cached on the card row until the transcript
-// file's mtime moves past the cached value.
-type Summary struct {
-	Enabled        bool     `yaml:"enabled"`
-	OllamaURL      string   `yaml:"ollama_url"`
-	OllamaModel    string   `yaml:"ollama_model"`
-	TurnsWindow    int      `yaml:"turns_window"`     // most-recent turns fed to the model
-	MaxTokens      int      `yaml:"max_tokens"`       // cap on generation length
-	TimeoutSec     int      `yaml:"timeout_sec"`      // HTTP timeout for the Ollama call
-	AutoGenerateOn []string `yaml:"auto_generate_on"` // statuses that queue a background job
-}
-
 type Config struct {
 	Repos             []Repo        `yaml:"repos"`
 	PollIntervalSec   int           `yaml:"poll_interval_sec"`
@@ -59,7 +44,6 @@ type Config struct {
 	CostAlertsEnabled bool          `yaml:"cost_alerts_enabled"`
 	BranchPrefix      string        `yaml:"branch_prefix"` // e.g. "amir/"
 	Notifications     Notifications `yaml:"notifications"`
-	Summary           Summary       `yaml:"summary"`
 }
 
 func DefaultConfig() Config {
@@ -74,15 +58,6 @@ func DefaultConfig() Config {
 			OnNeedsInput: true,
 			OnErrored:    true,
 			OnIdle:       false,
-		},
-		Summary: Summary{
-			Enabled:        false, // opt-in — user has to install Ollama + pull a model
-			OllamaURL:      "http://localhost:11434",
-			OllamaModel:    "llama3.2:3b",
-			TurnsWindow:    20,
-			MaxTokens:      120,
-			TimeoutSec:     30,
-			AutoGenerateOn: []string{"needs_input", "idle", "archived"},
 		},
 	}
 }
@@ -181,26 +156,6 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.LogMaxSizeMB <= 0 {
 		cfg.LogMaxSizeMB = 10
-	}
-	// Summary defaults kick in when the user adds `summary:` without
-	// spelling out every field.
-	if cfg.Summary.OllamaURL == "" {
-		cfg.Summary.OllamaURL = "http://localhost:11434"
-	}
-	if cfg.Summary.OllamaModel == "" {
-		cfg.Summary.OllamaModel = "llama3.2:3b"
-	}
-	if cfg.Summary.TurnsWindow <= 0 {
-		cfg.Summary.TurnsWindow = 20
-	}
-	if cfg.Summary.MaxTokens <= 0 {
-		cfg.Summary.MaxTokens = 120
-	}
-	if cfg.Summary.TimeoutSec <= 0 {
-		cfg.Summary.TimeoutSec = 30
-	}
-	if len(cfg.Summary.AutoGenerateOn) == 0 {
-		cfg.Summary.AutoGenerateOn = []string{"needs_input", "idle", "archived"}
 	}
 }
 

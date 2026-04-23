@@ -9,7 +9,6 @@ function __hive_commands
     echo -e "last\tAttach the most-recently-attached session"
     echo -e "peek\tSnapshot a pane without attaching"
     echo -e "card\tFormatted summary of a card"
-    echo -e "summarize\tRegenerate the LLM summary via Ollama"
     echo -e "tail\tLive-stream a pane"
     echo -e "send\tSend text without attaching"
     echo -e "done\tArchive a card (10s undo)"
@@ -42,16 +41,13 @@ for c in json.load(sys.stdin):
 ' 2>/dev/null
 end
 
-set -l __hive_subs new pr-review attach a last peek card summarize tail send done resume rm kill list ls archived watch status search cd open doctor tui daemon import config template version help
+set -l __hive_subs new pr-review attach a last peek card tail send done resume rm kill list ls archived watch status search cd open doctor tui daemon import config template version help
 complete -c hive -n "not __fish_seen_subcommand_from $__hive_subs" -f -a "(__hive_commands)"
 
 # Subcommand: attach-style cards
-for sub in attach a peek card summarize tail send done resume rm kill cd open
+for sub in attach a peek card tail send done resume rm kill cd open
     complete -c hive -n "__fish_seen_subcommand_from $sub" -f -a "(__hive_card_ids)"
 end
-
-complete -c hive -n "__fish_seen_subcommand_from summarize" -l all -s a -d "Every card"
-complete -c hive -n "__fish_seen_subcommand_from summarize" -l force -s f -d "Regenerate even if cached"
 
 complete -c hive -n "__fish_seen_subcommand_from card" -l json -d "JSON output"
 

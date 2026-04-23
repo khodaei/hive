@@ -10,7 +10,6 @@ _hive() {
     'last:Attach the most-recently-attached session'
     'peek:Print the last N lines of a pane without attaching'
     'card:Show a formatted summary of a card'
-    'summarize:Regenerate the local-LLM card summary via Ollama'
     'tail:Live-stream a session pane'
     'send:Send text to a session without attaching'
     'done:Archive a card (10s undo window)'
@@ -69,15 +68,6 @@ _hive() {
           ;;
         attach|a|resume|cd|card)
           _hive_cards
-          ;;
-        summarize)
-          _arguments \
-            '(-a --all)'{-a,--all}'[Every card]' \
-            '(-f --force)'{-f,--force}'[Regenerate even if cached is fresh]' \
-            '*:card:->cards'
-          if [[ $state == cards ]]; then
-            _hive_cards
-          fi
           ;;
         peek|tail)
           _arguments \

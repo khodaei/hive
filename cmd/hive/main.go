@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -139,8 +138,6 @@ func main() {
 		runPeek(os.Args[2:])
 	case "card":
 		runCard(os.Args[2:])
-	case "summarize":
-		runSummarize(os.Args[2:])
 	case "done":
 		runDone(os.Args[2:])
 	case "resume":
@@ -1137,119 +1134,6 @@ func runPeek(args []string) {
 	}
 }
 
-// --- Summary (local LLM via Ollama) ---
-
-// runSummarize backs `hive summarize [query] [--all] [--force]`.
-//
-// Regenerates the LLM summary for one or more cards by calling the Ollama
-// instance configured under `summary:` in config.yaml. Skips cards whose
-// cached summary is already fresh unless --force is passed. Ollama must be
-// reachable; on error, prints the message and exits non-zero. The picker
-// preview and `hive card` degrade gracefully (falling back to raw Recent
-// turns) when no cached summary exists, so this verb is never required for
-// the rest of the CLI to work.
-func runSummarize(args []string) {
-	all := false
-	force := false
-	var positional []string
-	for _, a := range args {
-		switch a {
-		case "--all", "-a":
-			all = true
-		case "--force", "-f":
-			force = true
-		default:
-			positional = append(positional, a)
-		}
-	}
-	query := strings.Join(positional, " ")
-
-	cfg, s := mustLoadConfigAndStore()
-	defer s.Close()
-
-	if !cfg.Summary.Enabled {
-		exitWith(exitConfigInvalid, "summary.enabled is false in config.yaml — set it to true to generate summaries")
-	}
-
-	cards, err := s.ListCards()
-	if err != nil {
-		log.Fatalf("list cards: %v", err)
-	}
-	if len(cards) == 0 {
-		log.Fatalf("no cards.")
-	}
-
-	var targets []store.Card
-	if all {
-		for _, c := range cards {
-			if c.WorktreePath == "" {
-				continue
-			}
-			targets = append(targets, c)
-		}
-	} else {
-		card, ok := resolveCardOrExit(cards, query, "summarize")
-		if !ok {
-			return
-		}
-		targets = []store.Card{card}
-	}
-
-	for _, c := range targets {
-		if err := generateSummary(s, c, cfg.Summary, force); err != nil {
-			if errors.Is(err, transcripts.ErrNoTranscript) {
-				fmt.Fprintf(os.Stderr, "%s: skipped (no transcript yet)\n", shortIDFmt(c.ID))
-				continue
-			}
-			fmt.Fprintf(os.Stderr, "%s: %v\n", shortIDFmt(c.ID), err)
-			if !all {
-				os.Exit(exitGeneral)
-			}
-			continue
-		}
-		fmt.Printf("%s  %s  summary regenerated\n", shortIDFmt(c.ID), c.Title)
-	}
-}
-
-// generateSummary is the shared path used by `hive summarize` (synchronous
-// from the CLI) and the poller (from a goroutine on status transitions).
-// Returns nil (silent no-op) when the cache is already up to date unless
-// force is true. Returns ErrNoTranscript when there's no Claude .jsonl yet.
-func generateSummary(s *store.Store, c store.Card, cfg config.Summary, force bool) error {
-	if c.WorktreePath == "" {
-		return transcripts.ErrNoTranscript
-	}
-	paths, err := transcripts.ListTranscripts(c.WorktreePath)
-	if err != nil {
-		return err
-	}
-	if len(paths) == 0 {
-		return transcripts.ErrNoTranscript
-	}
-	info, err := os.Stat(paths[0])
-	if err != nil {
-		return err
-	}
-	mtime := info.ModTime().Unix()
-
-	// Skip if cache is up to date.
-	if !force && c.SummaryTranscriptMtime >= mtime && c.Summary != "" {
-		return nil
-	}
-
-	res, err := transcripts.Summarize(context.Background(), c.WorktreePath, transcripts.SummaryOpts{
-		OllamaURL:   cfg.OllamaURL,
-		Model:       cfg.OllamaModel,
-		TurnsWindow: cfg.TurnsWindow,
-		MaxTokens:   cfg.MaxTokens,
-		Timeout:     time.Duration(cfg.TimeoutSec) * time.Second,
-	})
-	if err != nil {
-		return err
-	}
-	return s.UpdateCardSummary(c.ID, res.Text, res.TranscriptMtime)
-}
-
 // --- Card detail ---
 
 // runCard backs `hive card [query] [--json]` — print a formatted summary of
@@ -1392,21 +1276,25 @@ func printCardSummary(w io.Writer, c store.Card) {
 		row("Muted:", "yes")
 	}
 
-	// Cached LLM summary — shown above Recent turns when present. Fully
-	// fail-safe: if the cache is empty (Ollama down, feature off, or
-	// not-yet-generated), we skip this block and fall through to Recent
-	// turns below.
-	if c.Summary != "" {
-		fmt.Fprintln(w, dim+strings.Repeat("─", 48)+reset)
-		ageStr := humanAgeMain(c.SummaryGeneratedAt)
-		fmt.Fprintln(w, dim+"Summary"+reset+"  "+dim+"("+ageStr+" ago)"+reset)
-		renderSummary(w, c.Summary)
+	// Claude's own recap — when Claude Code goes idle it writes a short
+	// `type=system, subtype=away_summary` entry into the transcript. If we
+	// find one, show it; otherwise fall through to Recent turns.
+	gotRecap := false
+	if c.WorktreePath != "" {
+		if r, err := transcripts.LatestRecap(c.WorktreePath); err == nil && r != nil {
+			gotRecap = true
+			fmt.Fprintln(w, dim+strings.Repeat("─", 48)+reset)
+			ageStr := "unknown"
+			if !r.At.IsZero() {
+				ageStr = humanAgeMain(r.At.Unix())
+			}
+			fmt.Fprintln(w, dim+"Recap"+reset+"  "+dim+"("+ageStr+" ago, from Claude)"+reset)
+			renderSummary(w, r.Content)
+		}
 	}
 
-	// Recent transcript turns — the fallback when there's no cached summary.
-	// If a summary is present, skip this block: the two panels overlap in
-	// purpose and the summary alone is easier to read at a glance.
-	if c.Summary == "" && c.WorktreePath != "" {
+	// Recent transcript turns — shown when no recap has been written yet.
+	if !gotRecap && c.WorktreePath != "" {
 		turns, err := transcripts.LastTurns(c.WorktreePath, 4)
 		if err == nil && len(turns) > 0 {
 			fmt.Fprintln(w, dim+strings.Repeat("─", 48)+reset)
@@ -2882,11 +2770,6 @@ Inspect / interact:
                         Live-redraw the card list. Ctrl-C exits.
   card [query] [--json] Detailed summary of one card (also the picker's
                         preview source). Resolves against all cards.
-  summarize [query] [--all] [--force]
-                        Regenerate the local-LLM summary via Ollama.
-                        Cached on the card; used by 'hive card'. Safe to
-                        skip — 'hive card' falls back to Recent turns
-                        when no cached summary exists.
   peek [query] [-n N]   Last N lines of a pane (no attach).
   tail [query] [-n N]   Live pane stream. Ctrl-C exits.
   send [query] <msg>    Send text. <msg> may be "-" (stdin) or -e (editor).
@@ -2989,21 +2872,6 @@ var verbHelp = map[string]string{
 `,
 	"a":    "See 'hive help attach'.",
 	"last": "hive last, hive -\n\n  Attach the most-recently-attached live session.\n",
-	"summarize": `hive summarize [query] [--all] [--force]
-
-  Regenerate the local-LLM summary (via Ollama) for one or more cards.
-  Summary lines are cached on the card row and shown by 'hive card'.
-
-  Requires summary.enabled=true in config.yaml and a running Ollama
-  instance with the configured model pulled.
-
-  --all / -a     Iterate every card with a worktree.
-  --force / -f   Regenerate even when the cache is already fresh.
-
-  Fail-safe: if Ollama is unreachable, this verb errors out but every
-  other part of hive keeps working — 'hive card' falls back to showing
-  the raw Recent turns block when no cached summary exists.
-`,
 	"card": `hive card [query] [--json]
 
   Print a formatted summary of one card's metadata: title, repo, branch,
