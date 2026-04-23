@@ -204,9 +204,16 @@ func (p *Poller) checkCard(card store.Card) {
 				if err := tmux.Paste(card.TmuxSession, card.PendingPrompt); err != nil {
 					log.Printf("poller: send pending prompt: %v", err)
 				} else {
-					time.Sleep(300 * time.Millisecond)
-					// Submit the pasted block.
-					_ = exec.Command("tmux", "send-keys", "-t", card.TmuxSession, "Enter").Run()
+					// Wait long enough for Claude to finish ingesting the
+					// bracketed-paste block before we fire the submit — a
+					// shorter delay caused the Enter to arrive during paste
+					// processing and get eaten. C-m is the raw carriage
+					// return keycode (what pressing Return sends); more
+					// reliable across terminal/tmux configs than 'Enter'.
+					time.Sleep(1500 * time.Millisecond)
+					if err := exec.Command("tmux", "send-keys", "-t", card.TmuxSession, "C-m").Run(); err != nil {
+						log.Printf("poller: submit prompt: %v", err)
+					}
 					p.store.UpdateCardPendingPrompt(card.ID, "")
 					p.store.UpdateCardStatus(card.ID, store.StatusWorking)
 				}
