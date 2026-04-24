@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net/url"
 	"os"
@@ -990,14 +991,41 @@ func newCreate(title, prompt, repoName, branchOverride, worktreeOverride string,
 			}
 			fmt.Println()
 		case worktreeOverride != "":
-			wtPath = worktreeOverride
-			if branch == "" {
-				branch = currentBranchAt(wtPath)
-				if branch == "" {
-					branch = repoConfig.DefaultBranch
-				}
+			// Two flavors of --worktree:
+			//   - bare name (no separator) + --repo set → treat as a worktree
+			//     under the repo's root. Reuse it if it exists; create it via
+			//     `git worktree add` if not. This is what most users mean when
+			//     they say `-w incident-12345 -r ad-attribution`.
+			//   - path (contains a separator) → absolute or cwd-relative path
+			//     to an already-existing worktree. Fail if it doesn't exist.
+			wantPath := worktreeOverride
+			if !strings.Contains(worktreeOverride, string(filepath.Separator)) && !adhoc {
+				wantPath = filepath.Join(gitpkg.RepoRoot(repoConfig.Path), worktreeOverride)
 			}
-			fmt.Printf("Using worktree: %s (branch: %s)\n", wtPath, branch)
+			if _, err := os.Stat(wantPath); errors.Is(err, fs.ErrNotExist) {
+				if adhoc {
+					log.Fatalf("worktree %s doesn't exist and no --repo configured", wantPath)
+				}
+				if branch == "" {
+					branch = worktreeOverride
+				}
+				fmt.Printf("Creating new worktree in %s (branch: %s)...\n", repoConfig.Name, branch)
+				gitpkg.Fetch(repoConfig.Path)
+				created, err := gitpkg.CreateWorktree(repoConfig.Path, branch, repoConfig.DefaultBranch)
+				if err != nil {
+					log.Fatalf("create worktree: %v", err)
+				}
+				wtPath = created
+			} else {
+				wtPath = wantPath
+				if branch == "" {
+					branch = currentBranchAt(wtPath)
+					if branch == "" {
+						branch = repoConfig.DefaultBranch
+					}
+				}
+				fmt.Printf("Using worktree: %s (branch: %s)\n", wtPath, branch)
+			}
 		default:
 			detectedWT, detectedBranch := detectCurrentWorktree(cwd, repoConfig)
 			if detectedWT != "" {
